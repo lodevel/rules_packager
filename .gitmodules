@@ -1,0 +1,3 @@
+[submodule "packages/labscpi"]
+	path = packages/labscpi
+	url = https://github.com/lodevel/labscpi.git

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "test-procedure-generation"
+version = "0.1.0"
+description = "Test procedure generation helpers and LLM rule documents"
+requires-python = ">=3.10"
+authors = [{ name = "Adrien Lombet" }]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+test_procedure_generation = [
+  "rules/*/*",
+  "rules/rules_index.json",
+]

@@ -1,0 +1,22 @@
+{
+  "packs": [
+    {
+      "id": "base",
+      "enabled": true,
+      "rules": {
+        "source": { "type": "path", "path": "src/test_procedure_generation" },
+        "rules_index": "rules/rules_index.json"
+      },
+      "wheel": { "enabled": true }
+    },
+    {
+      "id": "labscpi",
+      "enabled": true,
+      "rules": {
+        "source": { "type": "path", "path": "packages/labscpi/src/labscpi" },
+        "rules_index": "rules/rules_index.json"
+      },
+      "wheel": { "enabled": true }
+    }
+  ]
+}

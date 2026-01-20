@@ -1,0 +1,13 @@
+{
+  "packs": [
+    {
+      "id": "controller-mockup",
+      "enabled": true,
+      "rules": {
+        "source": { "type": "path", "path": "packages/controller_mockup_driver/src/controller_mockup_driver" },
+        "rules_index": "rules/rules_index.json"
+      },
+      "wheel": { "enabled": true }
+    }
+  ]
+}
