@@ -43,9 +43,100 @@ def _clean_output_dir(out_dir: Path) -> None:
     (out_dir / "manifest.json").unlink(missing_ok=True)
 
 
+def _clean_wheels_dir(out_dir: Path) -> None:
+    # Only remove files we own.
+    for p in out_dir.glob("*.whl"):
+        p.unlink(missing_ok=True)
+    (out_dir / "requirements.txt").unlink(missing_ok=True)
+
+
+def _ensure_gui_project_layout(
+    *,
+    project_out: Path,
+    overwrite: bool,
+    init_empty_test: bool,
+    empty_test_name: str,
+) -> None:
+    if project_out.exists() and not project_out.is_dir():
+        raise SystemExit(f"--project-out must be a directory path: {project_out}")
+
+    project_out.mkdir(parents=True, exist_ok=True)
+
+    # GUI expects these directories to exist.
+    for rel in (
+        Path("config") / "rules",
+        Path("config") / "wheels",
+        Path("tests"),
+        Path("results"),
+        Path("scenarios"),
+        Path("reports"),
+    ):
+        (project_out / rel).mkdir(parents=True, exist_ok=True)
+
+    if not init_empty_test:
+        return
+
+    # Create a starter test so the GUI has a valid structure to scan.
+    test_dir = project_out / "tests" / empty_test_name
+    proc_path = test_dir / "procedure.json"
+    script_path = test_dir / "test.py"
+
+    if test_dir.exists() and any(test_dir.iterdir()) and not overwrite:
+        raise SystemExit(
+            f"Empty test folder already exists and is not empty: {test_dir} (use --overwrite)"
+        )
+
+    test_dir.mkdir(parents=True, exist_ok=True)
+
+    if overwrite or not proc_path.exists():
+        proc = {
+            "name": "EMPTY-TEST-001",
+            "description": "",
+            "equipment": [],
+            "steps": [],
+            "expected": [],
+            "board": "",
+        }
+        proc_path.write_text(json.dumps(proc, indent=2) + "\n", encoding="utf-8")
+
+    if overwrite or not script_path.exists():
+        script_path.write_text(
+            """#!/usr/bin/env python3
+import json
+from pathlib import Path
+
+
+def main() -> int:
+    # The GUI runs this script with cwd=results/<test_name>/
+    out = Path("results.json")
+    out.write_text(
+        json.dumps(
+            {
+                "overall": "PASS",
+                "measurements": {},
+                "criteria": {},
+                "verdicts": {},
+                "log": ["EMPTY-TEST-001: placeholder test script"],
+            },
+            indent=2,
+        )
+        + "\\n",
+        encoding="utf-8",
+    )
+    print(f"Wrote {out.resolve()}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+""",
+            encoding="utf-8",
+        )
+
+
 def collect_rules(*, registry_path: Path, out_dir: Path, overwrite: bool) -> None:
     _ensure_import_paths(_project_root())
-    from test_procedure_generation.driver_links import build_llm_context  # noqa: E402
+    from test_procedure_generation.driver_links import build_llm_context  # type: ignore[import-not-found]  # noqa: E402
 
     if out_dir.exists():
         if not overwrite:
@@ -133,8 +224,18 @@ def _run(cmd: list[str]) -> None:
         raise RuntimeError(f"Command failed ({p.returncode}): {' '.join(cmd)}")
 
 
-def build_selected_wheels(*, registry_path: Path, out_dir: Path, ensure_pip: bool, only_binary: bool) -> None:
+def build_selected_wheels(
+    *,
+    registry_path: Path,
+    out_dir: Path,
+    overwrite: bool,
+    ensure_pip: bool,
+    only_binary: bool,
+) -> None:
     print(f"Wheel output folder: {out_dir}")
+
+    if out_dir.exists() and overwrite:
+        _clean_wheels_dir(out_dir)
 
     if ensure_pip:
         _ensure_pip()
@@ -145,7 +246,7 @@ def build_selected_wheels(*, registry_path: Path, out_dir: Path, ensure_pip: boo
         raise SystemExit(1)
 
     _ensure_import_paths(_project_root())
-    from test_procedure_generation.driver_links import load_registry  # noqa: E402
+    from test_procedure_generation.driver_links import load_registry  # type: ignore[import-not-found]  # noqa: E402
 
     reg = load_registry(registry_path)
     packs = reg.get("packs")
@@ -313,9 +414,46 @@ def main(argv: list[str] | None = None) -> int:
         help="Output folder for wheels",
     )
 
+    ap.add_argument(
+        "--project-out",
+        default=None,
+        help=(
+            "Generate a GUI-ready project folder (compatible with test_procedure_gui). "
+            "If set, --rules-out and --wheels-out default to <project-out>/config/{rules,wheels}."
+        ),
+    )
+    ap.add_argument(
+        "--init-empty-test",
+        action="store_true",
+        help="Create a starter test under <project-out>/tests/",
+    )
+    ap.add_argument(
+        "--empty-test-name",
+        default="empty_test",
+        help="Name of the starter test folder created under <project-out>/tests/ (used with --init-empty-test)",
+    )
+
     args = ap.parse_args(argv)
 
     registry_path = Path(args.registry)
+
+    project_out: Path | None = Path(args.project_out) if args.project_out else None
+    if project_out is not None:
+        _ensure_gui_project_layout(
+            project_out=project_out,
+            overwrite=bool(args.overwrite),
+            init_empty_test=bool(args.init_empty_test),
+            empty_test_name=str(args.empty_test_name),
+        )
+
+        # Override outputs to point at the project folder unless the user explicitly set them.
+        default_rules_out = str(_project_root() / "output" / "config" / "rules")
+        default_wheels_out = str(_project_root() / "output" / "config" / "wheels")
+
+        if str(args.rules_out) == default_rules_out:
+            args.rules_out = str(project_out / "config" / "rules")
+        if str(args.wheels_out) == default_wheels_out:
+            args.wheels_out = str(project_out / "config" / "wheels")
 
     did_something = False
 
@@ -323,7 +461,7 @@ def main(argv: list[str] | None = None) -> int:
         collect_rules(
             registry_path=registry_path,
             out_dir=Path(args.rules_out),
-            overwrite=args.overwrite,
+            overwrite=bool(args.overwrite),
         )
         did_something = True
 
@@ -331,6 +469,7 @@ def main(argv: list[str] | None = None) -> int:
         build_selected_wheels(
             registry_path=registry_path,
             out_dir=Path(args.wheels_out),
+            overwrite=bool(args.overwrite),
             ensure_pip=bool(args.ensure_pip),
             only_binary=bool(args.only_binary),
         )
@@ -341,11 +480,12 @@ def main(argv: list[str] | None = None) -> int:
         collect_rules(
             registry_path=registry_path,
             out_dir=Path(args.rules_out),
-            overwrite=args.overwrite,
+            overwrite=bool(args.overwrite),
         )
         build_selected_wheels(
             registry_path=registry_path,
             out_dir=Path(args.wheels_out),
+            overwrite=bool(args.overwrite),
             ensure_pip=bool(getattr(args, "ensure_pip", False)),
             only_binary=bool(getattr(args, "only_binary", False)),
         )

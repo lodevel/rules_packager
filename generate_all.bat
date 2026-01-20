@@ -23,7 +23,9 @@ echo       - output\config\rules\
 echo       - output\config\wheels\
 echo   generate_all.bat --collect-rules --overwrite
 echo   generate_all.bat --build-wheels --ensure-pip
+echo   generate_all.bat --project-out "C:\\Path\\To\\MyProject" --overwrite --init-empty-test
 echo.
+
 
 REM Prefer the Python launcher on Windows (py), fall back to python.
 where py >nul 2>nul
