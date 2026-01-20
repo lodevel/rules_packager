@@ -41,7 +41,7 @@ Scope
 ## Usage
 
 ```python
-from rules_packager import prompt, read_measurement
+from rules_packager_base import prompt, read_measurement
 
 log = []
 serial = prompt("Enter serial number:", log)

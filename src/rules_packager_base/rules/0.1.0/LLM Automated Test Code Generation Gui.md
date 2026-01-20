@@ -194,7 +194,7 @@ from labscpi.eload_scpi import ElectronicLoad
 from labscpi.oscilloscope_scpi import Oscilloscope, Measure, ChannelUnit, TriggerSweepMode, MathOperator  # facade enums
 
 from fncore_mockup_driver import FncoreMockupClient as FncoreClient
-from rules_packager import (
+from rules_packager_base import (
     Result,
     prompt,
     prompt_choice,
@@ -550,7 +550,7 @@ RULES = {
 # -------- End parameters --------
 
 import time, traceback
-from rules_packager import Result, prompt, read_measurement
+from rules_packager_base import Result, prompt, read_measurement
 from labscpi.psu_scpi import PowerSupply
 from labscpi.oscilloscope_scpi import Oscilloscope, Measure, ChannelUnit, TriggerSweepMode, MathOperator  # facade enums
 

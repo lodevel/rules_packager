@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rules-packager"
+name = "rules-packager-base"
 version = "0.1.0"
-description = "Rules packager helpers and LLM rule documents"
+description = "Base runtime helpers and LLM rule documents"
 requires-python = ">=3.10"
 authors = [{ name = "Adrien Lombet" }]
 
@@ -16,7 +16,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-rules_packager = [
+rules_packager_base = [
   "rules/*/*",
   "rules/rules_index.json",
 ]

@@ -1,4 +1,4 @@
-# rules_packager
+# rules_packager (runtime: rules_packager_base)
 
 This project assembles a curated set of Markdown "rule" documents (for LLM context) and optionally builds Python wheels for the enabled packs.
 
@@ -365,7 +365,7 @@ The generated `requirements.txt` is designed for distributing wheels:
   "id": "base",
   "enabled": true,
   "rules": {
-    "source": { "type": "path", "path": "src/rules_packager" },
+    "source": { "type": "path", "path": "src/rules_packager_base" },
     "rules_index": "rules/rules_index.json"
   },
   "wheel": { "enabled": true }

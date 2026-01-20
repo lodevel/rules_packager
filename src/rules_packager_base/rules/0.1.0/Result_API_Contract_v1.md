@@ -44,7 +44,7 @@ Scope
 ## Usage
 
 ```python
-from rules_packager import Result
+from rules_packager_base import Result
 
 res = Result(test_name="EXAMPLE-001")
 res.measurements[1] = 3.30
