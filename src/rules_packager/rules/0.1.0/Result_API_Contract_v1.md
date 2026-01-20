@@ -44,7 +44,7 @@ Scope
 ## Usage
 
 ```python
-from test_procedure_generation import Result
+from rules_packager import Result
 
 res = Result(test_name="EXAMPLE-001")
 res.measurements[1] = 3.30

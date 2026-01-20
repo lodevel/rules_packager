@@ -4,7 +4,7 @@
       "id": "base",
       "enabled": true,
       "rules": {
-        "source": { "type": "path", "path": "src/test_procedure_generation" },
+        "source": { "type": "path", "path": "src/rules_packager" },
         "rules_index": "rules/rules_index.json"
       },
       "wheel": { "enabled": true }

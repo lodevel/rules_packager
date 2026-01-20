@@ -413,7 +413,7 @@ If the human supplied values, write them **directly** in the success conditions 
     - Collect a free-text operator observation for measurement `{n}` (may be empty), and include the target text in the prompt.
     - Ask the operator: `Is the result for {n} "<TEXT>"? [y/n/skip]:`
     - Store the operator decision as `PASS`/`FAIL`/`SKIP` under `verdicts[{n}]`.
-    - Use `operator_judgment(meas_id, target, log)` from `test_procedure_generation` when available.
+    - Use `operator_judgment(meas_id, target, log)` from `rules_packager` when available.
   - **Deterministic (machine-collected string):** If `{n}` is read automatically (e.g., from UART/CAN/I2C/SPI/driver API), then `{n} = <TEXT>` is evaluated in code:
     - Compare `measured.strip()` to `expected.strip()` for exact matches.
     - Treat `<TEXT>` as a regex only when authored as `/.../`; evaluate with `re.search(pattern, measured.strip())`.

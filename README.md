@@ -1,4 +1,4 @@
-# test_procedure_generation
+# rules_packager
 
 This project assembles a curated set of Markdown "rule" documents (for LLM context) and optionally builds Python wheels for the enabled packs.
 
@@ -128,8 +128,8 @@ It is used by:
 
 ## Registry files
 
-- Baseline (committed): `test_procedure_generation/drivers_registry.json`
-- Local override (ignored): `test_procedure_generation/drivers_registry.local.json`
+- Baseline (committed): `rules_packager/drivers_registry.json`
+- Local override (ignored): `rules_packager/drivers_registry.local.json`
   - To enable optional packs (e.g. FNCORE mockup) without changing the committed baseline, copy:
     - `drivers_registry.local.json.example` -> `drivers_registry.local.json`
 
@@ -138,7 +138,7 @@ Relative paths inside registry files are resolved relative to the folder contain
 ## Local packs folder (optional)
 
 This repo supports optional packs checked out under:
-- `test_procedure_generation/packages/`
+- `rules_packager/packages/`
 
 In this layout:
 - `packages/labscpi/` is expected to exist (subrepo/submodule).
@@ -365,7 +365,7 @@ The generated `requirements.txt` is designed for distributing wheels:
   "id": "base",
   "enabled": true,
   "rules": {
-    "source": { "type": "path", "path": "src/test_procedure_generation" },
+    "source": { "type": "path", "path": "src/rules_packager" },
     "rules_index": "rules/rules_index.json"
   },
   "wheel": { "enabled": true }

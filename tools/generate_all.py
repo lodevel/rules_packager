@@ -12,7 +12,7 @@ from typing import Any
 
 
 def _project_root() -> Path:
-    # .../test_procedure_generation/tools/generate_all.py -> project root
+    # .../rules_packager/tools/generate_all.py -> project root
     return Path(__file__).resolve().parents[1]
 
 
@@ -136,7 +136,7 @@ if __name__ == "__main__":
 
 def collect_rules(*, registry_path: Path, out_dir: Path, overwrite: bool) -> None:
     _ensure_import_paths(_project_root())
-    from test_procedure_generation.driver_links import build_llm_context  # type: ignore[import-not-found]  # noqa: E402
+    from rules_packager.driver_links import build_llm_context  # type: ignore[import-not-found]  # noqa: E402
 
     if out_dir.exists():
         if not overwrite:
@@ -246,7 +246,7 @@ def build_selected_wheels(
         raise SystemExit(1)
 
     _ensure_import_paths(_project_root())
-    from test_procedure_generation.driver_links import load_registry  # type: ignore[import-not-found]  # noqa: E402
+    from rules_packager.driver_links import load_registry  # type: ignore[import-not-found]  # noqa: E402
 
     reg = load_registry(registry_path)
     packs = reg.get("packs")

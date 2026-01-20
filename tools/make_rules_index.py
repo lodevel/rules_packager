@@ -2,7 +2,7 @@
 """Generate rules_index.json with SHA-256 checksums for .md files in a rules version folder.
 
 Writes to:
-  src/test_procedure_generation/rules/rules_index.json
+  src/rules_packager/rules/rules_index.json
 
 Usage:
   python tools/make_rules_index.py            # auto-detect latest version
@@ -18,7 +18,7 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-RULES_ROOT = ROOT / "src" / "test_procedure_generation" / "rules"
+RULES_ROOT = ROOT / "src" / "rules_packager" / "rules"
 
 
 def _sha256(fp: pathlib.Path) -> str:
