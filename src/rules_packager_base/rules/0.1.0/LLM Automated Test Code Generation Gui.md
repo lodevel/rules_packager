@@ -288,6 +288,11 @@ def eval_verdicts(meas, crit, opdec=None):
         v[rid] = "FAIL"
     return v
 
+def step_progress(n: int, desc: str, log: list) -> None:
+    msg = f"STEP {n} - {desc}"
+    print(msg, flush=True)
+    log.append(msg)
+
 def run_test():
     _require_filled()
     res = Result()
@@ -313,10 +318,12 @@ def run_test():
     try:
         # Steps
 
-        # 1) Wiring PSU, OFF
+        # Step 1 - Wire PSU1 to P4(+SR_28V)/P5(GND) with output OFF to prepare power input
+        step_progress(1, "Wire PSU1 to P4(+SR_28V)/P5(GND) with output OFF to prepare power input", res.log)
         prompt("Connect PSU1 + to P4 (+SR_28V) and − to P5 (GND). Leave output OFF. Type 'ok' when done.", res.log)
 
-        # 2) PSU setpoints, still OFF
+        # Step 2 - Configure PSU1 to 28 V / ILIM with output OFF to set stimulus limits
+        step_progress(2, "Configure PSU1 to 28 V / ILIM with output OFF to set stimulus limits", res.log)
         if PSU_REMOTE:
             psu.set_voltage(PSU_CHANNEL, PSU_SET_VOLT)
             if ILIM_AMPS is None:
@@ -326,74 +333,112 @@ def run_test():
         else:
             prompt(f"Set PSU to {PSU_SET_VOLT} V and ILIM={'MAX' if ILIM_AMPS is None else f'{ILIM_AMPS} A'}. Keep OFF. Type 'ok'.", res.log)
 
-        # 3) Tie P6.2 to P4
+        # Step 3 - Tie P6.2 (IF_SAFETY#PPU.EPO) to P4(+SR_28V) to apply the required safety condition
+        step_progress(3, "Tie P6.2 (IF_SAFETY#PPU.EPO) to P4(+SR_28V) to apply the required safety condition", res.log)
         prompt("Tie P6 pin 2 (IF_SAFETY#PPU.EPO) to P4 (+SR_28V). Type 'ok' when done.", res.log)
 
-        # 4) Load wiring, OFF
+        # Step 4 - Wire electronic load to P1(+PPU_28V)/P2(GND) with output OFF to prepare load stimulus
+        step_progress(4, "Wire electronic load to P1(+PPU_28V)/P2(GND) with output OFF to prepare load stimulus", res.log)
         prompt("Connect electronic load to P1(+PPU_28V)/P2(GND). Keep OFF. Type 'ok'.", res.log)
 
-        # 5) Load CC 15 A
+        # Step 5 - Configure e-load constant-current 15 A with output OFF to define the load condition
+        step_progress(5, "Configure e-load constant-current 15 A with output OFF to define the load condition", res.log)
         if ELOAD_REMOTE: el.set_current(ELOAD_CHANNEL, float(ELOAD_CC_AMPS))
         else: prompt(f"Set e-load CC {ELOAD_CC_AMPS} A. Keep OFF. Type 'ok'.", res.log)
 
-        # 6) Scope CH1 to TP45
+        # Step 6 - Connect oscilloscope CH1 probe to TP45 (ref GND) to observe the target node
+        step_progress(6, "Connect oscilloscope CH1 probe to TP45 (ref GND) to observe the target node", res.log)
         prompt("Connect scope CH1 probe to TP45, ref GND. Type 'ok'.", res.log)
-        # 7) Scope CH2 to TP44
+
+        # Step 7 - Connect oscilloscope CH2 probe to TP44 (ref GND) to observe the reference node
+        step_progress(7, "Connect oscilloscope CH2 probe to TP44 (ref GND) to observe the reference node", res.log)
         prompt("Connect scope CH2 probe to TP44, ref GND. Type 'ok'.", res.log)
 
-        # 8..11) Scope config
+        # Step 8 - Enable scope CH1/CH2 and set DC coupling to match the procedure setup
+        step_progress(8, "Enable scope CH1/CH2 and set DC coupling to match the procedure setup", res.log)
         if SCOPE_REMOTE:
             scope.set_channel_enabled(1, True); scope.set_channel_enabled(2, True)
             scope.set_channel_coupling(1, "DC"); scope.set_channel_coupling(2, "DC")
+        else:
+            prompt("On scope: enable CH1 and CH2; set both to DC coupling. Type 'ok'.", res.log)
+
+        # Step 9 - Set scope CH1 to 1 V/div, offset 0 V to scale the waveform correctly
+        step_progress(9, "Set scope CH1 to 1 V/div, offset 0 V to scale the waveform correctly", res.log)
+        if SCOPE_REMOTE:
             scope.set_channel_scale(1, CH1_VDIV); scope.set_channel_offset(1, CH1_OFFS)
+        else:
+            prompt("On scope: set CH1 1 V/div, offset 0 V. Type 'ok'.", res.log)
+
+        # Step 10 - Set scope CH2 to 1 V/div, offset 0 V to scale the waveform correctly
+        step_progress(10, "Set scope CH2 to 1 V/div, offset 0 V to scale the waveform correctly", res.log)
+        if SCOPE_REMOTE:
             scope.set_channel_scale(2, CH2_VDIV); scope.set_channel_offset(2, CH2_OFFS)
+        else:
+            prompt("On scope: set CH2 1 V/div, offset 0 V. Type 'ok'.", res.log)
+
+        # Step 11 - Set timebase/trigger and define MATH=CH1-CH2 to enable the required delta capture
+        step_progress(11, "Set timebase/trigger and define MATH=CH1-CH2 to enable the required delta capture", res.log)
+        if SCOPE_REMOTE:
             scope.set_time_scale(SCOPE_TDIV_S)
             scope.set_trigger(edge_src=TRIG_SRC, level=TRIG_LEVEL_V, slope=TRIG_SLOPE)
             scope.set_math_source(1, 1, "CHAN1")
             scope.set_math_source(1, 1, "CHAN2")
             scope.enable_math(1, True, op=MathOperator.SUBTRACT)
         else:
-            prompt("Configure scope: CH1=1V/div DC, CH2=1V/div DC, time=1ms/div, trigger CH1 rising @1V, MATH=CH1-CH2. Type 'ok'.", res.log)
+            prompt("Configure scope: time=1ms/div, trigger CH1 rising @1V, MATH=CH1-CH2. Type 'ok'.", res.log)
 
-        # 12) PSU ON
+        # Step 12 - Turn PSU1 output ON to apply power to the DUT
+        step_progress(12, "Turn PSU1 output ON to apply power to the DUT", res.log)
         if PSU_REMOTE: psu.output(PSU_CHANNEL, True)
         else: prompt("Turn PSU1 ON. Type 'ok'.", res.log)
 
 
-        # 13) DSC18 = 1
+        # Step 13 - Set DSC IO#DSC18 (EPO_FNCORE) = 1 to enable the EPO function
+        step_progress(13, "Set DSC IO#DSC18 (EPO_FNCORE) = 1 to enable the EPO function", res.log)
         fn.write_digital("DSC", "IO#DSC18", 1)
-        # 14) DSC41 = 1
+
+        # Step 14 - Set DSC IO#DSC41 (CHG_NCTRL) = 1 to enable charge control
+        step_progress(14, "Set DSC IO#DSC41 (CHG_NCTRL) = 1 to enable charge control", res.log)
         fn.write_digital("DSC", "IO#DSC41", 1)
-        # 15) DAC0 = 3.3V
+
+        # Step 15 - Set DSC DAC#DSC0 = 3.3 V to drive the control input high
+        step_progress(15, "Set DSC DAC#DSC0 = 3.3 V to drive the control input high", res.log)
         fn.write_analog_volts("DSC", "DAC#DSC0", 3.3)
 
-        # 16) Measure {1}
+        # Step 16 - Measure DC voltage P1(+PPU_28V) to P2(GND) as {1} to capture the baseline value
+        step_progress(16, "Measure DC voltage P1(+PPU_28V) to P2(GND) as {1} to capture the baseline value", res.log)
         v1 = read_measurement("Measure P1(+PPU_28V)-P2(GND) (e.g., 2.40V):", res.log)
         res.measurements[1] = v1
 
-        # 17) Load ON
+        # Step 17 - Turn electronic load ON (15 A CC) to apply the load condition
+        step_progress(17, "Turn electronic load ON (15 A CC) to apply the load condition", res.log)
         if ELOAD_REMOTE: el.set_output(ELOAD_CHANNEL, True)
         else: prompt("Turn e-load ON (15 A CC). Type 'ok'.", res.log)
 
-        # 18) Measure {2}
+        # Step 18 - Measure DC voltage P1(+PPU_28V) to P2(GND) as {2} to capture the loaded value
+        step_progress(18, "Measure DC voltage P1(+PPU_28V) to P2(GND) as {2} to capture the loaded value", res.log)
         v2 = read_measurement("Measure P1(+PPU_28V)-P2(GND) (e.g., 2.40V):", res.log)
         res.measurements[2] = v2
 
-        # 19) DAC0 = 1.0V
+        # Step 19 - Set DSC DAC#DSC0 = 1.0 V to change the control input level
+        step_progress(19, "Set DSC DAC#DSC0 = 1.0 V to change the control input level", res.log)
         fn.write_analog_volts("DSC", "DAC#DSC0", 1.0)
 
-        # 20) Measure {3}
+        # Step 20 - Measure DC voltage P1(+PPU_28V) to P2(GND) as {3} to capture the new regulated value
+        step_progress(20, "Measure DC voltage P1(+PPU_28V) to P2(GND) as {3} to capture the new regulated value", res.log)
         v3 = read_measurement("Measure P1(+PPU_28V)-P2(GND) (e.g., 2.40V):", res.log)
         res.measurements[3] = v3
 
-        # 21) Scope single
+        # Step 21 - Arm oscilloscope Single acquisition to capture one event
+        step_progress(21, "Arm oscilloscope Single acquisition to capture one event", res.log)
         if SCOPE_REMOTE:
             scope.single()
         else:
             prompt("Put scope in Single mode. Type 'ok' when armed.", res.log)
 
 
-        # 22) Capture math, then SI text and decision for {4}
+        # Step 22 - Capture MATH waveform; record visual SI as {4}; save screenshot for evidence
+        step_progress(22, "Capture MATH waveform; record visual SI as {4}; save screenshot for evidence", res.log)
         fname = "scope_math_single.png"
         if SCOPE_REMOTE:
             ok = scope.wait_for_single_acq_complete(timeout_ms=10000)
@@ -415,7 +460,8 @@ def run_test():
         res.measurements[4] = si_text
         res.verdicts[4] = si_verdict
 
-        # 23) Rise time {5} on CH1
+        # Step 23 - Measure rise time on CH1 as {5} to quantify edge speed
+        step_progress(23, "Measure rise time on CH1 as {5} to quantify edge speed", res.log)
         if SCOPE_REMOTE:
             scope.enable_measure(Measure.RISE, src="CHAN1")
             trise = float(scope.get_measure(Measure.RISE, src="CHAN1"))
@@ -423,7 +469,8 @@ def run_test():
             trise = read_measurement("Enter {5} rise time on CH1 (e.g., 8ns):", res.log, default_unit="s")
         res.measurements[5] = trise
 
-        # 24) Mean {6} on CH2
+        # Step 24 - Measure mean voltage on CH2 as {6} to quantify the reference level
+        step_progress(24, "Measure mean voltage on CH2 as {6} to quantify the reference level", res.log)
         if SCOPE_REMOTE:
             scope.enable_measure(Measure.AVG, src="CHAN2")
             ch2avg = float(scope.get_measure(Measure.AVG, src="CHAN2"))
@@ -507,8 +554,7 @@ Expected results
 ##### 2) Generated code (1:1 with steps, resilient input)
 
 ```python
-# Test: REVERSE-POLARITY-INPUT-THRESHOLD 
-— Reverse polarity current threshold
+# Test: REVERSE-POLARITY-INPUT-THRESHOLD - Reverse polarity current threshold
 # Implements the latest single-sequence procedure. Remote/manual branching. Evidence saved.
 
 # -------- Parameters --------
@@ -554,6 +600,11 @@ from rules_packager_base import Result, prompt, read_measurement
 from labscpi.psu_scpi import PowerSupply
 from labscpi.oscilloscope_scpi import Oscilloscope, Measure, ChannelUnit, TriggerSweepMode, MathOperator  # facade enums
 
+def step_progress(n: int, desc: str, log: list) -> None:
+    msg = f"STEP {n} - {desc}"
+    print(msg, flush=True)
+    log.append(msg)
+
 def _require_filled():
     missing = []
     if PSU_REMOTE and not PSU_VISA: missing.append("PSU_VISA")
@@ -573,11 +624,8 @@ def _eval_rule(rule, meas):
     if typ == "gt_abs": return x >  t
     raise ValueError(f"Unsupported rule type: {typ}")
 
-# Step: ramp and detect threshold, with manual fallback
-def step_current_threshold(res, psu=None, scope=None):
-    fname = "seq1_current_threshold.png"
-
-    if PSU_REMOTE and SCOPE_REMOTE:
+def ramp_until_current_threshold(res, psu=None, scope=None) -> float:
+    if PSU_REMOTE and SCOPE_REMOTE and psu and scope:
         scope.clear_measures()
         scope.enable_measure(Measure.AVG, src="CHAN3")  # CH3 mean in A
         psu.output(PSU_CHANNEL, True)
@@ -593,20 +641,13 @@ def step_current_threshold(res, psu=None, scope=None):
                 break
             v += int(RAMP_STEP_V)
 
-        with open(fname, "wb") as f:
-            f.write(scope.screenshot_png())
-
-        res.measurements[0] = trip_v
-        res.add_evidence("Current threshold waveform", fname, meas_id=0)
-        return
+        return trip_v
 
     # Manual
     prompt("Turn PSU OUTPUT ON.", res.log)
-    prompt("Ramp 1 V → 28 V in 1 V steps. At each step read CH3 mean current. Stop at first step where I > 100 mA.", res.log)
+    prompt("Ramp 1 V -> 28 V in 1 V steps. At each step read CH3 mean current. Stop at first step where I > 100 mA.", res.log)
     vth = read_measurement("Enter {0}: first voltage where I > 100 mA (0 V if never):", res.log, default_unit="V")
-    res.measurements[0] = vth
-    prompt("Save a scope screenshot named exactly 'seq1_current_threshold.png'. Type 'ok' after saving.", res.log)
-    res.add_evidence("Current threshold waveform", "seq1_current_threshold.png", meas_id=0)
+    return float(vth)
 
 def run_test():
     _require_filled()
@@ -624,7 +665,8 @@ def run_test():
             scope = Oscilloscope(SCOPE_VISA, timeout_ms=SCOPE_TIMEOUT_MS)
             scope.connect(); scope.initialize(); scope.reset()
 
-        # PSU: 28 V / 1 A, output OFF
+        # Step 1 - Configure PSU to 28 V / 1 A (current limit) with output OFF to set stimulus limits
+        step_progress(1, "Configure PSU to 28 V / 1 A (current limit) with output OFF to set stimulus limits", res.log)
         if PSU_REMOTE:
             psu.set_voltage(PSU_CHANNEL, float(PSU_SET_VOLT))
             psu.set_current(PSU_CHANNEL, float(ILIM_AMPS))
@@ -632,8 +674,12 @@ def run_test():
         else:
             prompt(f"Set PSU to {PSU_SET_VOLT} V, current limit {ILIM_AMPS} A, OUTPUT OFF. Type 'ok'.", res.log)
 
-        # CH3 current probe on P4; verify amps mode
+        # Step 2 - Connect current probe at P4 to scope CH3 (DC coupling) to measure input current
+        step_progress(2, "Connect current probe at P4 to scope CH3 (DC coupling) to measure input current", res.log)
         prompt(f"Connect current probe to input conductor at {IN_CONN} → scope CH3, DC coupling. Type 'ok'.", res.log)
+
+        # Step 3 - Configure scope CH3 to measure amps correctly to ensure current readings are valid
+        step_progress(3, "Configure scope CH3 to measure amps correctly to ensure current readings are valid", res.log)
         if SCOPE_REMOTE:
             scope.set_channel_enabled(3, True)
             scope.set_channel_coupling(3, "DC")
@@ -644,26 +690,52 @@ def run_test():
         else:
             prompt("Verify CH3 measures Amps with correct probe factor; set DC coupling, 50 mA/div, offset 0 A.", res.log)
 
-        # CH1/CH2 wiring and verticals; MATH for VGS per procedure (no VGS sequence needed)
+        # Step 4 - Connect CH1 to D1.Anode and CH2 to R3.1 (ref GND) to measure Q2 VGS
+        step_progress(4, "Connect CH1 to D1.Anode and CH2 to R3.1 (ref GND) to measure Q2 VGS", res.log)
         prompt(f"Connect CH1 → D1.Anode (GND ref) and CH2 → R3.{R3_PIN} (GND ref). Type 'ok'.", res.log)
+
+        # Step 5 - Configure CH1/CH2 and MATH=CH1-CH2 (DC coupling) to derive VGS
+        step_progress(5, "Configure CH1/CH2 and MATH=CH1-CH2 (DC coupling) to derive VGS", res.log)
         if SCOPE_REMOTE:
             scope.set_channel_enabled(1, True); scope.set_channel_coupling(1, "DC")
             scope.set_channel_scale(1, 10.0);  scope.set_channel_offset(1, 0.0)
             scope.set_channel_enabled(2, True); scope.set_channel_coupling(2, "DC")
             scope.set_channel_scale(2, 10.0);  scope.set_channel_offset(2, 0.0)
             scope.enable_math(True, op=MathOperator.SUBTRACT, src1="CHAN1", src2="CHAN2")
+        else:
+            prompt("On scope: CH1=10 V/div, off=0 V; CH2=10 V/div, off=0 V; MATH=CH1-CH2, DC coupling. Type 'ok'.", res.log)
+
+        # Step 6 - Configure MATH scaling and scope AUTO/RUN to prepare the sequence capture
+        step_progress(6, "Configure MATH scaling and scope AUTO/RUN to prepare the sequence capture", res.log)
+        if SCOPE_REMOTE:
             scope.set_math_scale(10.0)
             scope.set_math_offset(0.0)
             scope.set_trigger_sweep(TriggerSweepMode.AUTO)
             scope.run()
         else:
-            prompt("On scope: CH1=10 V/div, off=0 V; CH2=10 V/div, off=0 V; MATH=CH1-CH2, 10 V/div, off=0 V; Sweep=AUTO; RUN.", res.log)
+            prompt("On scope: set MATH to 10 V/div, offset 0 V; set mode AUTO/RUN; verify CH3 at 50 mA/div, offset 0 A. Type 'ok'.", res.log)
 
-        # Reverse PSU polarity at P4
+        # Step 7 - Reverse PSU polarity at P4 to execute the reverse-polarity condition
+        step_progress(7, "Reverse PSU polarity at P4 to execute the reverse-polarity condition", res.log)
         prompt(f"Reverse PSU polarity at {IN_CONN}. Verify wiring. Type 'ok'.", res.log)
 
-        # Ramp 1→28 V and detect first I > 100 mA → {0}; screenshot
-        step_current_threshold(res, psu if PSU_REMOTE else None, scope if SCOPE_REMOTE else None)
+        # Step 8 - Turn PSU ON and ramp 1 V -> 28 V while monitoring current to find the threshold
+        step_progress(8, "Turn PSU ON and ramp 1 V -> 28 V while monitoring current to find the threshold", res.log)
+        trip_v = ramp_until_current_threshold(res, psu if PSU_REMOTE else None, scope if SCOPE_REMOTE else None)
+
+        # Step 9 - Record the first voltage where current exceeds 100 mA as {0} for evaluation
+        step_progress(9, "Record the first voltage where current exceeds 100 mA as {0} for evaluation", res.log)
+        res.measurements[0] = trip_v
+
+        # Step 10 - Save screenshot; restore safe state (PSU OFF, normal polarity) to leave hardware safe
+        step_progress(10, "Save screenshot; restore safe state (PSU OFF, normal polarity) to leave hardware safe", res.log)
+        fname = "seq1_current_threshold.png"
+        if PSU_REMOTE and SCOPE_REMOTE:
+            with open(fname, "wb") as f:
+                f.write(scope.screenshot_png())
+        else:
+            prompt(f"Save a scope screenshot named exactly '{fname}'. Type 'ok' after saving.", res.log)
+        res.add_evidence("Current threshold waveform", fname, meas_id=0)
 
         # Safe state: PSU OFF and normal polarity
         if PSU_REMOTE:
@@ -735,7 +807,24 @@ When multiple measurements must be taken on the same physical node using differe
 
 - **1:1 mapping (expanded semantics)** – The script must behave as if it executed each step from the fully expanded procedure in order. When the authored procedure contains macro directives, the generated Python may use loops/conditionals for efficiency, but it must not reorder, merge, omit, or interleave actions relative to the expanded step stream.
 
-- **Descriptive step comments** – For every numbered test step, emit a preceding inline comment # Step N — <what & why> that summarizes the operator action and engineering intent in one short sentence. Place it directly above the code or prompt that performs the step. This is mandatory for readability and auditability.
+- **Step markers (mandatory)** – For every numbered test step, emit a preceding inline comment in the form `# Step N - <what & why>` directly above the code or prompt that performs the step.
+  - **Exact prefix (ASCII):** the marker line must start with `# Step ` + integer `N` + ` - ` (space-hyphen-space). Use the keyboard hyphen `-`.
+  - **Single-line description:** `<what & why>` is a single sentence summarizing the operator action and engineering intent; it must not contain newlines.
+  - **No duplicate markers:** do not additionally emit a bare `# Step N` line. The descriptive marker line is the canonical step marker.
+
+- **Runtime step progress (mandatory)** – Immediately after each step-marker comment (`# Step N - ...`), emit a runtime progress banner so the operator can see which step is executing.
+  - **Placement:** it must be the first executable statement for that step (before any prompt/SCPI/controller action).
+  - **Console + log:** it must print to stdout and append the same string to `res.log`.
+  - **Format (exact prefix):** `STEP N - <what & why>` using the ASCII keyboard hyphen `-`.
+  - **Description binding:** the `<what & why>` string must match the step-marker comment text after `# Step N - ` exactly.
+  - **Macro/loop semantics:** if the generator uses loops/conditionals, the progress banner still must be emitted once per expanded step number `N` in authored order.
+  - **Canonical helper (recommended):**
+    ```python
+    def step_progress(n: int, desc: str, log: list) -> None:
+        msg = f"STEP {n} - {desc}"
+        print(msg, flush=True)
+        log.append(msg)
+    ```
 
 - **No silent channel mapping**:
    - The generator must never infer that a board connector (Pnn, Jnn, etc.) is driven by a
@@ -1139,10 +1228,12 @@ except Exception as e:
 When generating code, the LLM must also emit a **verification view** in the generation response so a human can review that each authored step maps to the intended code.
 
 Requirements:
-- **Step markers:** The generated code must include an exact marker comment line `# Step N` for every expanded procedure step `N` in authored order.
+- **Step markers:** The generated code must include a step-marker comment line for every expanded procedure step `N` in authored order.
+  - **Extractor matching:** A step marker is identified by the exact prefix `# Step N` (with `N` as a base-10 integer). The extractor may ignore any suffix text after `# Step N`.
+  - **Canonical form:** Use `# Step N - <what & why>` as the step-marker line.
 - **Per-step mapping output:** After code generation, output a per-step view where each section contains:
   - `STEP N: <verbatim step text>`
-  - the code block associated with `# Step N` (from that marker line up to, but not including, the next `# Step (N+1)` marker)
+  - the code block associated with the step-marker line whose prefix matches `# Step N` (from that marker line up to, but not including, the next step-marker line whose prefix matches `# Step (N+1)`)
   - source line numbers for the code block
 - **Macro handling:** If macros/directives exist, the verification view must be based on the **expanded procedure** (linear steps, no directives, all `{ID_EXPR}` resolved).
 - **No execution:** The verification view is a review artifact; do not run hardware actions or import instrument drivers to produce it.
@@ -1283,6 +1374,3 @@ RULES = {
 - **Power‑good signals** – If a status signal (e.g. power good) is available as a microcontroller IO, always read it via the controller's interface that IO.  Do not measure it with a scope or ask the operator to observe it.
 
 - **Ask when in doubt** – These rules are strict.  If the test procedure is unclear or missing information, pause and ask the user for clarification.  Never guess or make assumptions.  If instrument commands, connection details, or target values are unknown, you must obtain them before generating or executing code.
-
-
-
