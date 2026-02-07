@@ -1225,9 +1225,10 @@ except Exception as e:
 ```
 
 ### Verification View (step ↔ code mapping)
-When generating code, the LLM must also emit a **verification view** in the generation response so a human can review that each authored step maps to the intended code.
+Emit the **verification view** only when the user explicitly asks for it (e.g., they request "verification view", "step ↔ code mapping", or "per-step mapping output"). By default, do not emit the verification view.
 
-Requirements:
+Requirements (only when requested):
+- **Request gate:** If the user did not ask for the verification view, do not output it (no placeholder section).
 - **Step markers:** The generated code must include a step-marker comment line for every expanded procedure step `N` in authored order.
   - **Extractor matching:** A step marker is identified by the exact prefix `# Step N` (with `N` as a base-10 integer). The extractor may ignore any suffix text after `# Step N`.
   - **Canonical form:** Use `# Step N - <what & why>` as the step-marker line.
