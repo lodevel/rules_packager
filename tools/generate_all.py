@@ -134,7 +134,7 @@ if __name__ == "__main__":
         )
 
 
-def collect_rules(*, registry_path: Path, out_dir: Path, overwrite: bool) -> None:
+def collect_rules(*, registry_path: Path, out_dir: Path, overwrite: bool, sha_check: str) -> None:
     _ensure_import_paths(_project_root())
     from rules_packager_base.driver_links import build_llm_context  # type: ignore[import-not-found]  # noqa: E402
 
@@ -145,7 +145,7 @@ def collect_rules(*, registry_path: Path, out_dir: Path, overwrite: bool) -> Non
     else:
         out_dir.mkdir(parents=True, exist_ok=True)
 
-    docs = build_llm_context(registry_path=registry_path)
+    docs = build_llm_context(registry_path=registry_path, sha_check=sha_check)
 
     manifest: list[dict[str, object]] = []
 
@@ -394,6 +394,16 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     ap.add_argument(
+        "--sha-check",
+        choices=["off", "warn", "error"],
+        default="off",
+        help=(
+            "Rule doc sha256 verification mode when loading packs (default: off). "
+            "Use 'error' for strict checking."
+        ),
+    )
+
+    ap.add_argument(
         "--build-wheels",
         action="store_true",
         help="Build wheels for enabled local projects into output/config/wheels/",
@@ -462,6 +472,7 @@ def main(argv: list[str] | None = None) -> int:
             registry_path=registry_path,
             out_dir=Path(args.rules_out),
             overwrite=bool(args.overwrite),
+            sha_check=str(args.sha_check),
         )
         did_something = True
 
@@ -481,6 +492,7 @@ def main(argv: list[str] | None = None) -> int:
             registry_path=registry_path,
             out_dir=Path(args.rules_out),
             overwrite=bool(args.overwrite),
+            sha_check=str(args.sha_check),
         )
         build_selected_wheels(
             registry_path=registry_path,

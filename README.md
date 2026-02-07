@@ -422,7 +422,10 @@ Note: if you run `--build-wheels` with this pack enabled, wheel building will ha
   - Fix by making every `packs[].id` unique.
 
 - Rule doc sha256 mismatch:
-  - A doc changed but its `rules_index.json` was not regenerated.
+  - You enabled strict sha checking and a doc changed but its `rules_index.json` was not regenerated.
+  - Fix options:
+    - Regenerate the index: `make_rules_index.bat` (Windows) or `python3 tools/make_rules_index.py`.
+    - Or relax checking when collecting rules: `tools/generate_all.py --sha-check off` (default) or `--sha-check warn`.
 
 - Enabled pack does not declare wheel.enabled=true:
   - You enabled a pack but did not mark it wheel-buildable.

@@ -8,6 +8,7 @@ from importlib.resources.abc import Traversable
 import json
 from pathlib import Path
 from typing import Any
+import warnings
 
 
 @dataclasses.dataclass(frozen=True)
@@ -23,6 +24,9 @@ class RuleDoc:
 
 class RulesLoadError(RuntimeError):
     pass
+
+
+_SHA_CHECK_MODES = {"off", "warn", "error"}
 
 
 def _read_text_file(path: Path) -> str:
@@ -79,7 +83,14 @@ def _resource_base_for_package(package_name: str) -> Traversable:
         raise RulesLoadError(f"Failed to resolve package resources for {package_name!r}: {e}")
 
 
-def _load_pack_from_root(*, pack_root: Any, rules_index_rel: str, source_label: str, origin: str) -> list[RuleDoc]:
+def _load_pack_from_root(
+    *,
+    pack_root: Any,
+    rules_index_rel: str,
+    source_label: str,
+    origin: str,
+    sha_check: str,
+) -> list[RuleDoc]:
     idx_path = pack_root / rules_index_rel
     try:
         idx_raw = idx_path.read_text(encoding="utf-8")
@@ -123,10 +134,19 @@ def _load_pack_from_root(*, pack_root: Any, rules_index_rel: str, source_label: 
         actual_sha = hashlib.sha256(md_bytes).hexdigest()
         md = md_bytes.decode("utf-8")
         if expected_sha and expected_sha != actual_sha:
-            raise RulesLoadError(
+            if sha_check not in _SHA_CHECK_MODES:
+                raise RulesLoadError(
+                    f"Invalid sha_check mode: {sha_check!r} (expected one of: {sorted(_SHA_CHECK_MODES)})"
+                )
+
+            msg = (
                 "Rule doc sha256 mismatch: "
                 f"{origin}:{md_path} expected={expected_sha} actual={actual_sha}"
             )
+            if sha_check == "error":
+                raise RulesLoadError(msg)
+            if sha_check == "warn":
+                warnings.warn(msg)
 
         doc_id, title = _parse_frontmatter(md)
         docs.append(
@@ -212,7 +232,7 @@ def load_registry(registry_path: Path, registry_local_path: Path | None = None) 
     return {"packs": merged}
 
 
-def build_llm_context(*, registry_path: Path) -> list[RuleDoc]:
+def build_llm_context(*, registry_path: Path, sha_check: str = "off") -> list[RuleDoc]:
     """Build a deterministic list of rule documents for LLM context.
 
     The registry is type-agnostic: it is a list of independently enabled "packs".
@@ -264,6 +284,7 @@ def build_llm_context(*, registry_path: Path) -> list[RuleDoc]:
                     rules_index_rel=rules_index_rel,
                     source_label=f"pack:{pack_id}",
                     origin=pkg,
+                    sha_check=sha_check,
                 )
             )
         elif src["type"] == "path":
@@ -279,6 +300,7 @@ def build_llm_context(*, registry_path: Path) -> list[RuleDoc]:
                     rules_index_rel=rules_index_rel,
                     source_label=f"pack:{pack_id}",
                     origin=str(root),
+                    sha_check=sha_check,
                 )
             )
         else:
@@ -305,9 +327,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print loaded docs (doc_id/title/source) and exit",
     )
+    ap.add_argument(
+        "--sha-check",
+        choices=sorted(_SHA_CHECK_MODES),
+        default="off",
+        help="Rule doc sha256 verification mode (default: off)",
+    )
 
     args = ap.parse_args(argv)
-    docs = build_llm_context(registry_path=Path(args.registry))
+    docs = build_llm_context(registry_path=Path(args.registry), sha_check=str(args.sha_check))
 
     if args.dump:
         for d in docs:
