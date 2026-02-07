@@ -18,7 +18,7 @@ checksum: e3bf0c94bc7717638bb4aaa93e52db4e3bae5bf0f7d8376d166a6728638587e5
 
 ## Purpose and Scope
 
-These rules define exactly how a large-language-model (LLM) must translate a written hardware test procedure into an executable Python/SCPI script.  They are **mandatory**, not suggestions.  The generated script must follow each directive precisely: use the exact sequence of steps given in the procedure, ask for and use the correct equipment details, handle microcontroller resources via the active **device profile’s controller interface**, enforce the single-probe-per-node rule, and never invent commands or make assumptions.  If anything in the test procedure or equipment information is missing or ambiguous, stop and ask the user to clarify before proceeding.  Do not improvise or reorder steps.
+These rules define exactly how a large-language-model (LLM) must translate a written hardware test procedure into an executable Python script. They are **mandatory**, not suggestions. The generated script must follow each directive precisely: use the exact sequence of steps given in the procedure, default instruments to manual unless remote automation was explicitly requested, handle microcontroller resources via the active **device profile’s controller interface**, enforce the single-probe-per-node rule, and never invent commands or make assumptions. If anything in the test procedure is missing or ambiguous, stop and ask the user to clarify before proceeding. Do not improvise or reorder steps.
 
 ## Procedure Macro DSL (directives in procedures)
 
@@ -51,7 +51,7 @@ Use these as canonical patterns. Each example has three parts the LLM can follow
 
 #### Example 1: EPO and Load Regulation
 
-This test is in full manual mode, adapt if user gives information on remote equipment
+This test defaults all instruments to manual mode (`*_REMOTE = False`, `*_VISA = None`). Remote automation, if desired, is enabled only by editing the generated parameter block.
 
 ##### 1) Test procedure
 
@@ -140,27 +140,27 @@ DEVICE_PROFILE = "FNCORE_MOCK"
 CONTROLLER_MANUAL_OVERRIDE = True
 FNCORE_PORT = "COM7"
 FNCORE_BAUD = 115200
-FNCORE_TIMEOUT = 2.0  # s
+FNCORE_TIMEOUT = 5.0  # s
 
 # PSU
 PSU_REMOTE = False
-PSU_VISA = "ASRL3::INSTR"
-PSU_CHANNEL = 1
+PSU_VISA = None
+PSU_CHANNEL = None
 PSU_TIMEOUT_MS = 5000
 PSU_SET_VOLT = 28.0
 ILIM_AMPS = None  # None => set MAX via raw SCPI
 
 # Electronic load
 ELOAD_REMOTE = False
-ELOAD_VISA = "ASRL18::INSTR"
-ELOAD_CHANNEL = 1
-ELOAD_TIMEOUT_MS = 3000
+ELOAD_VISA = None
+ELOAD_CHANNEL = None
+ELOAD_TIMEOUT_MS = 5000
 ELOAD_CC_AMPS = 15.0
 
 # Oscilloscope
-SCOPE_REMOTE = True
-SCOPE_VISA = "TCPIP0::192.168.0.10::INSTR"
-SCOPE_TIMEOUT_MS = 3000
+SCOPE_REMOTE = False
+SCOPE_VISA = None
+SCOPE_TIMEOUT_MS = 5000
 SCOPE_TDIV_S = 1e-3            # 1 ms/div
 CH1_VDIV = 1.0                  # V/div
 CH1_OFFS = 0.0
@@ -561,19 +561,19 @@ Expected results
 TEST_NAME = "REVERSE-POLARITY-INPUT-THRESHOLD"
 
 # Control modes
-PSU_REMOTE = True
-SCOPE_REMOTE = True
+PSU_REMOTE = False
+SCOPE_REMOTE = False
 
 # PSU
-PSU_VISA = "ASRL3::INSTR"
-PSU_CHANNEL = 1
+PSU_VISA = None
+PSU_CHANNEL = None
 PSU_TIMEOUT_MS = 5000
 PSU_SET_VOLT = 28.0
 ILIM_AMPS = 1.0  # 1 A limit
 
 # Scope
-SCOPE_VISA = "TCPIP0::192.168.0.10::INSTR"
-SCOPE_TIMEOUT_MS = 3000
+SCOPE_VISA = None
+SCOPE_TIMEOUT_MS = 5000
 
 # Nodes
 IN_CONN = "P4"
@@ -778,19 +778,20 @@ This guide is device‑agnostic. Device‑specific behaviors are defined in exte
 
 ## Preflight and Per‑Device Declarations
 
-1. **Per‑device remote/manual declarations** – During the LLM chat, ask the user, **for every instrument**, whether it will be **remote‑controlled** (instrument‑control, via SCPI/pyVISA) or **manual** (operator‑only).  There is no global “mode”; the choice is made per instrument.
+1. **Remote/manual defaults (mandatory)** – Do not ask the user to choose remote vs manual. If the user did not explicitly request remote automation for a device, treat it as **manual** by default.
+   - Set all `<DEVICE>_REMOTE = False` by default.
+   - Set all `<DEVICE>_VISA = None` by default.
+   - Do not emit any meta‑remarks or warnings in the generation response about missing remote/manual declarations.
+   - If the user explicitly requests remote automation for a device, set `<DEVICE>_REMOTE = True` but still do not ask for connection details. Keep `<DEVICE>_VISA = None` and rely on the startup check to force the user to fill it before remote control can run.
 
 **Device profile selection (mandatory).** Collect `{DEVICE_PROFILE}` (e.g., `"NONE"`, `"DRIVER_X"`). The executor must apply the selected profile’s argument semantics, connection defaults, required parameters, and logging rules.
 
-2. **Mandatory equipment details** – For each remote instrument collect:
-   - Vendor and model.
-   - Connection type (ASRL, TCPIP, USB, or GPIB).
-   - VISA resource string.
-   - Protocol parameters (baud rate, parity, data bits, stop bits, flow control, IP address, etc.).
+2. **No equipment interrogation (mandatory)** – Do not ask for vendor/model/connection/protocol/VISA details in chat. Remote automation, if enabled, must be achieved by the user editing the generated script parameter block.
 
    For the controller interface, collect the link parameters required by the **active device profile** (e.g., port, baud, timeout) and whether microcontroller commands will be executed automatically or manually.
 
 3. **Missing parameters** – All required parameters (instrument addresses, channel numbers, timeouts, target values, etc.) must be stored as variables in the generated script. If any remain `None` after generation, the script shall run a startup check and raise an error listing the missing values. Include any **profile‑required** parameters declared by the active `{DEVICE_PROFILE}`.
+   - **Timeout default:** If a timeout parameter is required, default it to **5 seconds** (e.g., `*_TIMEOUT_MS = 5000` or `*_TIMEOUT_S = 5.0`).
 
 4. **No runtime prompts for equipment details** – Once the script is generated, it must **never** prompt the operator for connection details.  Only prompts for measurements or manual actions are permitted at runtime.
 
@@ -964,11 +965,11 @@ If a referenced channel is undefined or unavailable, mark the step AMBIGUOUS.
 
 ## SCPI and Equipment API Guidelines
 
-- **APIs**: APIs should be avaialble for code generation, use them by default.
+- **APIs**: Use instrument APIs/SCPI only when remote automation is explicitly enabled for that device (`<DEVICE>_REMOTE = True`). Naming an instrument in the procedure does not imply remote control.
 
 - **Raw pyVISA** – Use the `pyvisa` library and raw SCPI commands to control instruments.  Do not wrap these calls in custom helper classes.  Each SCPI snippet must perform a single atomic action: connect, configure, arm, poll, measure scalar, capture screenshot, set voltage/current, toggle output, etc.
 
-- **Ask for instrument details** – The LLM must ask the user for vendor, model, connection type, VISA resource string, and protocol parameters for each remote instrument.  Do not assume defaults (channels, coupling, units) – request and store the details during preflight.
+- **No instrument detail questions** – Do not ask the user for vendor/model/connection/protocol/VISA details. Leave connection variables (e.g., `*_VISA`) as `None` unless the user already provided values.
 
 - **Cheat‑sheets** – When possible, refer to vendor‑specific cheat‑sheets for common instruments (e.g. Rigol DS/MSO scopes, Keysight InfiniiVision scopes, Rigol or Keysight PSUs) to determine the correct SCPI commands.  If the necessary commands are unknown, ask the user or use general SCPI (IEEE 488.2) where applicable.
 
@@ -981,7 +982,7 @@ If a referenced channel is undefined or unavailable, mark the step AMBIGUOUS.
 
 - **Voltage wording defaults.** If a step says *“Measure voltage on/at `<node>`”* with no subtype, interpret it as **mean DC voltage**. 
 
-- **Measurement default rule.** If a step does not name an instrument and does not require oscilloscope-specific features, treat it as a manual measurement and prompt for the value. If the procedure names an instrument or the instrument is set to remote, emit façade/SCPI for that device. 
+- **Measurement default rule.** If a step does not name an instrument and does not require oscilloscope-specific features, treat it as a manual measurement and prompt for the value. Naming an instrument does not imply remote automation. Emit façade/SCPI only when that device is explicitly enabled as remote (`<DEVICE>_REMOTE = True`).
 
 - **Manual evidence:** After a screenshot, manual or not, always call add_evidence() with the same label and meas_id.
 
@@ -1043,7 +1044,7 @@ Use a robust unit‑parsing mechanism for operator inputs:
 
 ## Tests Common Checklist
 
-- **Per‑device remote/manual selection**: – During the chat, the user must declare for each instrument whether it is remote or manual.  Do not assume remote control for any device unless the user specifies it.
+- **Per‑device remote/manual default**: – Do not ask the user to choose remote vs manual. If not explicitly requested, default to manual (`<DEVICE>_REMOTE = False`) and do not emit any warnings/remarks about missing declarations.
 
 - **Default to manual measurements**: – If no instrument is declared for a required measurement, the script must prompt the operator to measure manually.  Do not attempt to guess instrument parameters.
 
