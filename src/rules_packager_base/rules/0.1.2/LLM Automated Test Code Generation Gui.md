@@ -1,10 +1,10 @@
 ---
 doc_id: llm-test-codegen-gui-v1
 title: LLM Automated Test Code Generation GUI
-version: v1.0.0
+version: v1.1.0
 status: active
 created: 2025-11-05
-updated: 2025-11-05
+updated: 2026-03-03
 maintainer: esd.dev-QA
 audience: internal-test-automation
 description: Orchestrates preflight, code generation, and run; emits test.py, results.json, and artifacts.
@@ -14,11 +14,21 @@ related:
   - scpi-oscilloscope-api-v1
   - scpi-eload-api-v1
   - controller-driver-pack
-checksum: e3bf0c94bc7717638bb4aaa93e52db4e3bae5bf0f7d8376d166a6728638587e5
+checksum: c1d9d494bf952bd9e64a9140766f4df9fe132a14af51ee06510e52fcb642aeb3
 ---
 ## Purpose and Scope
 
-These rules define exactly how a large-language-model (LLM) must translate a written hardware test procedure into an executable Python script. They are **mandatory**, not suggestions. The generated script must follow each directive precisely: use the exact sequence of steps given in the procedure, default instruments to manual unless remote automation was explicitly requested, handle microcontroller resources via the active **device profile’s controller interface**, enforce the single-probe-per-node rule, and never invent commands or make assumptions. If anything in the test procedure is missing or ambiguous, stop and ask the user to clarify before proceeding. Do not improvise or reorder steps.
+These rules define exactly how a large-language-model (LLM) must translate a written hardware test procedure into an executable Python script. They are **mandatory**.
+
+The generated script must:
+- follow procedure order (no reordering)
+- use the active device profile’s controller interface for controller resources
+- enforce single-probe-per-node
+- never invent steps/commands
+
+If the procedure is missing/ambiguous, stop and ask the user.
+
+Remote/manual defaults are defined in **Preflight and Per-Device Declarations**.
 
 ## Procedure Macro DSL (directives in procedures)
 
@@ -40,7 +50,7 @@ If a procedure contains repeated patterns but no macros, the LLM may suggest a m
 
 ## Worked examples
 
-Use these as canonical patterns. Each example has three parts the LLM can follow:
+Use these as canonical patterns. Each example has two parts the LLM can follow:
 1) Test procedure
 2) Generated code
 
@@ -48,10 +58,7 @@ Use these as canonical patterns. Each example has three parts the LLM can follow
 - [Example 1: EPO and Load Regulation](#example-1-epo-and-load-regulation)
 - [Example 2: Oscilloscope configuration and voltage sweep measuring current](#example-2-oscilloscope-configuration-and-voltage-sweep-measuring-current)
 
-
 #### Example 1: EPO and Load Regulation
-
-This test defaults all instruments to manual mode (`*_REMOTE = False`, `*_VISA = None`). Remote automation, if desired, is enabled only by editing the generated parameter block.
 
 ##### 1) Test procedure
 
@@ -200,6 +207,8 @@ from rules_packager_base import (
     prompt_choice,
     read_measurement,
     operator_judgment,
+    checkpoint_results,
+    finalize_partial_results,
 )
 
 def _require_filled():
@@ -255,7 +264,7 @@ def eval_verdicts(meas, crit, opdec=None):
         # Single-measurement comparators
         if t in ("within_pct","range_abs","lt_abs","le_abs","gt_abs","ge_abs","eq_abs"):
             mid = c.get("ref")
-            if mid not in meas: v[rid] = "FAIL"; continue
+            if mid not in meas: v[rid] = "SKIP"; continue
             m = float(meas[mid])
             if t == "within_pct":
                 v[rid] = "PASS" if c["lower"] <= m <= c["upper"] else "FAIL"
@@ -276,7 +285,7 @@ def eval_verdicts(meas, crit, opdec=None):
         # Expression comparators: (mi - mj) ∘ limit
         if t in ("lt_abs_expr","le_abs_expr","gt_abs_expr","ge_abs_expr","eq_abs_expr"):
             i, j = c["refs"]
-            if i not in meas or j not in meas: v[rid] = "FAIL"; continue
+            if i not in meas or j not in meas: v[rid] = "SKIP"; continue
             lhs = float(meas[i]) - float(meas[j])
             if   t == "lt_abs_expr": v[rid] = "PASS" if lhs <  c["limit"] else "FAIL"
             elif t == "le_abs_expr": v[rid] = "PASS" if lhs <= c["limit"] else "FAIL"
@@ -458,7 +467,8 @@ def run_test():
         # {4} subjective string target: {4} = Ok with margin
         si_text, si_verdict = operator_judgment(4, "Ok with margin", res.log)
         res.measurements[4] = si_text
-        res.verdicts[4] = si_verdict
+        # Verdicts are keyed by criterion id (RULES/criteria key), not measurement id.
+        res.verdicts[5] = si_verdict
 
         # Step 23 - Measure rise time on CH1 as {5} to quantify edge speed
         step_progress(23, "Measure rise time on CH1 as {5} to quantify edge speed", res.log)
@@ -479,8 +489,8 @@ def run_test():
         res.measurements[6] = ch2avg
 
         # Evaluate (preserve operator verdicts for subjective checks)
-        res.verdicts = eval_verdicts(res.measurements, res.criteria)
-        res.verdicts[4] = si_verdict
+        res.verdicts.update(eval_verdicts(res.measurements, res.criteria))
+        finalize_partial_results(res, missing_verdict="SKIP")
 
         # Safe state
         try:
@@ -493,16 +503,20 @@ def run_test():
         res.print_json()
         return res
 
-    except Exception as e:
-        # --- mandatory exception handling ---
-        tb = traceback.format_exc().strip().splitlines()[-1]  # last line summary
-        res.log.append(f"EXCEPTION: {e}")
-        res.log.append(f"TRACEBACK: {tb}")
-        res.verdicts[0] = "FAIL"      # reserved synthetic verdict to force overall=FAIL
+    except BaseException as e:
+        # --- mandatory exception/abort handling ---
+        # Best-effort evaluation from whatever was measured so far
+        try:
+            res.verdicts.update(eval_verdicts(res.measurements, res.criteria))
+        except Exception:
+            pass
+        finalize_partial_results(res, exc=e, missing_verdict="SKIP")
         res.print_json()
         return res
 
     finally:
+        # Persist partial results even on stop events (Ctrl+C / Ctrl+Break / CTRL_BREAK_EVENT)
+        checkpoint_results(res, json_path="results.json", html_path="results.html")
         try:
             if fn and not CONTROLLER_MANUAL_OVERRIDE: fn.close()
         except Exception: pass
@@ -517,9 +531,8 @@ def run_test():
         except Exception: pass
 
 if __name__ == "__main__":
-    res = run_test()
-    with open("results.json", "w", encoding="utf-8") as f:
-        json.dump(res.to_json(), f, indent=2, ensure_ascii=False)
+    # results.json/results.html are written by checkpoint_results() in finally
+    run_test()
 
 ```
 
@@ -527,37 +540,25 @@ if __name__ == "__main__":
 
 ##### 1) Test procedure
 
-Configure the programmable power supply to 28 V / 1 A (current limit), output OFF.
+Test steps
 
-Connect the oscilloscope current probe to the input conductor at P4, to CH3, DC coupling.
+1) Configure PSU to 28 V / 1 A (current limit), output OFF.
+2) Connect current probe at P4 to scope CH3, DC coupling.
+3) Configure CH3 to measure current correctly (probe factor, units A, 50 mA/div, offset 0 A).
+4) Reverse PSU polarity at P4.
+5) Turn PSU ON; ramp 1 V -> 28 V while monitoring CH3 mean current. Record the first voltage where I > 100 mA as {0} (0 V if never).
+6) Save a scope screenshot. Restore safe state: PSU OFF and normal polarity at P4.
 
-Verify that the channel 3 is configured to measure amps correctly
+Success conditions
 
-Connect CH1 to D1.Anode and CH2 to R3.1. 
-
-Configure CH1 with 10V/div, offset of 0V Configure Ch2 with 10V/div, offset of 0V Configure MATH = CH1 – CH2 to measure Q2 VGS, coupling DC.
-
-Configure MATH to 10V/div, offset of 0V Configure the oscilloscope for sequence 1 (current threshold): Set the A/div to 50mA, offset to 0A , Auto mode.
-
-Reverse the power supply polarity at P4.
-
-Turn the power supply ON, start at 1 V and ramp slowly up to 28 V while monitoring current.
-
-Record the input voltage at which the current exceeds 100 mA (if 100 mA is never reached up to 28 V, enter 0 V) → {0}.
-
-Save a screenshot of the waveform. Restore a safe state: power supply OFF and normal polarity at P4. 
-
-Expected results 
-
-{1} = 0V
+{0} = 0 V
 
 ##### 2) Generated code (1:1 with steps, resilient input)
 
 ```python
 # Test: REVERSE-POLARITY-INPUT-THRESHOLD - Reverse polarity current threshold
-# Implements the latest single-sequence procedure. Remote/manual branching. Evidence saved.
+# Reduced example: code matches the reduced procedure above.
 
-# -------- Parameters --------
 TEST_NAME = "REVERSE-POLARITY-INPUT-THRESHOLD"
 
 # Control modes
@@ -566,231 +567,197 @@ SCOPE_REMOTE = False
 
 # PSU
 PSU_VISA = None
-PSU_CHANNEL = None
+PSU_CHANNEL = 1
 PSU_TIMEOUT_MS = 5000
 PSU_SET_VOLT = 28.0
-ILIM_AMPS = 1.0  # 1 A limit
+ILIM_AMPS = 1.0
 
 # Scope
 SCOPE_VISA = None
 SCOPE_TIMEOUT_MS = 5000
 
-# Nodes
-IN_CONN = "P4"
-R3_PIN = "1"
-
-# Ramp parameters
-CURRENT_THRESHOLD_A = 0.100  # 100 mA
-RAMP_START_V = 1.0
-RAMP_STOP_V  = 28.0
-RAMP_STEP_V  = 1.0
-RAMP_DWELL_S = 0.20  # s
-
-# Current probe sensitivity (CH3). Set to your probe value in V/A (e.g., 1.0, 10.0).
+# Measurement
 CURRENT_PROBE_SENS_V_PER_A = 1.0
+CURRENT_THRESHOLD_A = 0.100  # 100 mA
+IN_CONN = "P4"
 
-# ---- Success rule ----
+# Ramp
+RAMP_START_V = 1.0
+RAMP_STOP_V = 28.0
+RAMP_STEP_V = 1.0
+RAMP_DWELL_S = 0.20
+
 RULES = {
-    1: {"type":"eq_abs", "ref": 0, "limit": 0.0, "units":"V", "expr":"{0} == 0 V"}
+    1: {"type": "eq_abs", "ref": 0, "limit": 0.0, "units": "V", "expr": "{0} == 0 V"},
 }
-# -------- End parameters --------
 
-import time, traceback
-from rules_packager_base import Result, prompt, read_measurement
+import time
+from rules_packager_base import Result, prompt, read_measurement, checkpoint_results, finalize_partial_results
 from labscpi.psu_scpi import PowerSupply
-from labscpi.oscilloscope_scpi import Oscilloscope, Measure, ChannelUnit, TriggerSweepMode, MathOperator  # facade enums
+from labscpi.oscilloscope_scpi import Oscilloscope, Measure, ChannelUnit
+
 
 def step_progress(n: int, desc: str, log: list) -> None:
     msg = f"STEP {n} - {desc}"
     print(msg, flush=True)
     log.append(msg)
 
-def _require_filled():
+
+def startup_check():
     missing = []
-    if PSU_REMOTE and not PSU_VISA: missing.append("PSU_VISA")
-    if PSU_REMOTE and not PSU_CHANNEL: missing.append("PSU_CHANNEL")
-    if SCOPE_REMOTE and not SCOPE_VISA: missing.append("SCOPE_VISA")
+    if PSU_REMOTE and not PSU_VISA:
+        missing.append("PSU_VISA")
+    if SCOPE_REMOTE and not SCOPE_VISA:
+        missing.append("SCOPE_VISA")
     if missing:
         raise RuntimeError("Startup parameters missing: " + ", ".join(missing))
 
-def _eval_rule(rule, meas):
-    x = float(meas.get(rule["ref"], float("nan")))
-    t = float(rule["limit"])
-    typ = rule["type"]
-    if typ == "eq_abs": return x == t
-    if typ == "le_abs": return x <= t
-    if typ == "ge_abs": return x >= t
-    if typ == "lt_abs": return x <  t
-    if typ == "gt_abs": return x >  t
-    raise ValueError(f"Unsupported rule type: {typ}")
 
-def ramp_until_current_threshold(res, psu=None, scope=None) -> float:
-    if PSU_REMOTE and SCOPE_REMOTE and psu and scope:
-        scope.clear_measures()
-        scope.enable_measure(Measure.AVG, src="CHAN3")  # CH3 mean in A
-        psu.output(PSU_CHANNEL, True)
+def eval_rule_best_effort(rule: dict, meas: dict) -> str:
+    ref = rule.get("ref")
+    if ref not in meas:
+        return "SKIP"
+    return "PASS" if float(meas[ref]) == float(rule["limit"]) else "FAIL"
 
-        trip_v = 0.0
-        v = int(RAMP_START_V)
-        while v <= int(RAMP_STOP_V):
-            psu.set_voltage(PSU_CHANNEL, float(v))
-            time.sleep(RAMP_DWELL_S)
-            i_mean = float(scope.get_measure(Measure.AVG, src="CHAN3"))
-            if i_mean > CURRENT_THRESHOLD_A:
-                trip_v = float(v)
-                break
-            v += int(RAMP_STEP_V)
 
-        return trip_v
+def run_test() -> Result:
+    res = Result(test_name=TEST_NAME)
+    res.criteria = dict(RULES)
 
-    # Manual
-    prompt("Turn PSU OUTPUT ON.", res.log)
-    prompt("Ramp 1 V -> 28 V in 1 V steps. At each step read CH3 mean current. Stop at first step where I > 100 mA.", res.log)
-    vth = read_measurement("Enter {0}: first voltage where I > 100 mA (0 V if never):", res.log, default_unit="V")
-    return float(vth)
+    psu = None
+    scope = None
 
-def run_test():
-    _require_filled()
-    res = Result()
-    res.test_name = TEST_NAME
-    res.criteria = RULES
-
-    psu = scope = None
     try:
-        # Sessions
+        startup_check()
+
+        # Step 1 - Configure PSU 28 V / 1 A, output OFF
+        step_progress(1, "Configure PSU 28 V / 1 A, output OFF", res.log)
         if PSU_REMOTE:
             psu = PowerSupply(PSU_VISA, timeout_ms=PSU_TIMEOUT_MS)
-            psu.connect(); psu.initialize()
-        if SCOPE_REMOTE:
-            scope = Oscilloscope(SCOPE_VISA, timeout_ms=SCOPE_TIMEOUT_MS)
-            scope.connect(); scope.initialize(); scope.reset()
-
-        # Step 1 - Configure PSU to 28 V / 1 A (current limit) with output OFF to set stimulus limits
-        step_progress(1, "Configure PSU to 28 V / 1 A (current limit) with output OFF to set stimulus limits", res.log)
-        if PSU_REMOTE:
+            psu.connect()
+            psu.initialize()
             psu.set_voltage(PSU_CHANNEL, float(PSU_SET_VOLT))
             psu.set_current(PSU_CHANNEL, float(ILIM_AMPS))
             psu.output(PSU_CHANNEL, False)
         else:
-            prompt(f"Set PSU to {PSU_SET_VOLT} V, current limit {ILIM_AMPS} A, OUTPUT OFF. Type 'ok'.", res.log)
+            prompt("Set PSU to 28 V, ILIM 1 A, OUTPUT OFF. Type 'ok'.", res.log)
 
-        # Step 2 - Connect current probe at P4 to scope CH3 (DC coupling) to measure input current
-        step_progress(2, "Connect current probe at P4 to scope CH3 (DC coupling) to measure input current", res.log)
-        prompt(f"Connect current probe to input conductor at {IN_CONN} → scope CH3, DC coupling. Type 'ok'.", res.log)
+        # Step 2 - Connect current probe at P4 to scope CH3 (DC)
+        step_progress(2, "Connect current probe at P4 to scope CH3 (DC)", res.log)
+        prompt(f"Connect current probe at {IN_CONN} to scope CH3, DC coupling. Type 'ok'.", res.log)
 
-        # Step 3 - Configure scope CH3 to measure amps correctly to ensure current readings are valid
-        step_progress(3, "Configure scope CH3 to measure amps correctly to ensure current readings are valid", res.log)
+        # Step 3 - Configure CH3 for current measurement
+        step_progress(3, "Configure CH3 for current measurement", res.log)
         if SCOPE_REMOTE:
+            scope = Oscilloscope(SCOPE_VISA, timeout_ms=SCOPE_TIMEOUT_MS)
+            scope.connect()
+            scope.initialize()
+            scope.reset()
             scope.set_channel_enabled(3, True)
             scope.set_channel_coupling(3, "DC")
             scope.set_channel_units(3, ChannelUnit.AMP)
-            scope.set_probe_sensitivity(3, float(CURRENT_PROBE_SENS_V_PER_A))  # V/A
-            scope.set_channel_scale(3, 0.05)   # 50 mA/div
+            scope.set_probe_sensitivity(3, float(CURRENT_PROBE_SENS_V_PER_A))
+            scope.set_channel_scale(3, 0.05)
             scope.set_channel_offset(3, 0.0)
         else:
-            prompt("Verify CH3 measures Amps with correct probe factor; set DC coupling, 50 mA/div, offset 0 A.", res.log)
+            prompt("Verify CH3 measures Amps with correct probe factor; set 50 mA/div, offset 0 A. Type 'ok'.", res.log)
 
-        # Step 4 - Connect CH1 to D1.Anode and CH2 to R3.1 (ref GND) to measure Q2 VGS
-        step_progress(4, "Connect CH1 to D1.Anode and CH2 to R3.1 (ref GND) to measure Q2 VGS", res.log)
-        prompt(f"Connect CH1 → D1.Anode (GND ref) and CH2 → R3.{R3_PIN} (GND ref). Type 'ok'.", res.log)
+        # Step 4 - Reverse PSU polarity at P4
+        step_progress(4, "Reverse PSU polarity at P4", res.log)
+        prompt(f"Reverse PSU polarity at {IN_CONN}. Type 'ok'.", res.log)
 
-        # Step 5 - Configure CH1/CH2 and MATH=CH1-CH2 (DC coupling) to derive VGS
-        step_progress(5, "Configure CH1/CH2 and MATH=CH1-CH2 (DC coupling) to derive VGS", res.log)
-        if SCOPE_REMOTE:
-            scope.set_channel_enabled(1, True); scope.set_channel_coupling(1, "DC")
-            scope.set_channel_scale(1, 10.0);  scope.set_channel_offset(1, 0.0)
-            scope.set_channel_enabled(2, True); scope.set_channel_coupling(2, "DC")
-            scope.set_channel_scale(2, 10.0);  scope.set_channel_offset(2, 0.0)
-            scope.enable_math(True, op=MathOperator.SUBTRACT, src1="CHAN1", src2="CHAN2")
+        # Step 5 - Ramp 1 V -> 28 V and record {0}
+        step_progress(5, "Ramp 1 V -> 28 V and record {0}", res.log)
+        trip_v = 0.0
+        if PSU_REMOTE and SCOPE_REMOTE and psu and scope:
+            scope.clear_measures()
+            scope.enable_measure(Measure.AVG, src="CHAN3")
+            psu.output(PSU_CHANNEL, True)
+
+            v = float(RAMP_START_V)
+            while v <= float(RAMP_STOP_V):
+                psu.set_voltage(PSU_CHANNEL, v)
+                time.sleep(float(RAMP_DWELL_S))
+                i_mean = float(scope.get_measure(Measure.AVG, src="CHAN3"))
+                if i_mean > float(CURRENT_THRESHOLD_A):
+                    trip_v = v
+                    break
+                v += float(RAMP_STEP_V)
         else:
-            prompt("On scope: CH1=10 V/div, off=0 V; CH2=10 V/div, off=0 V; MATH=CH1-CH2, DC coupling. Type 'ok'.", res.log)
+            prompt("Turn PSU OUTPUT ON.", res.log)
+            prompt("Ramp 1 V -> 28 V. Stop at first step where I > 100 mA.", res.log)
+            trip_v = float(read_measurement("Enter {0} (0 V if never):", res.log, default_unit="V"))
 
-        # Step 6 - Configure MATH scaling and scope AUTO/RUN to prepare the sequence capture
-        step_progress(6, "Configure MATH scaling and scope AUTO/RUN to prepare the sequence capture", res.log)
-        if SCOPE_REMOTE:
-            scope.set_math_scale(10.0)
-            scope.set_math_offset(0.0)
-            scope.set_trigger_sweep(TriggerSweepMode.AUTO)
-            scope.run()
-        else:
-            prompt("On scope: set MATH to 10 V/div, offset 0 V; set mode AUTO/RUN; verify CH3 at 50 mA/div, offset 0 A. Type 'ok'.", res.log)
+        res.measurements[0] = float(trip_v)
 
-        # Step 7 - Reverse PSU polarity at P4 to execute the reverse-polarity condition
-        step_progress(7, "Reverse PSU polarity at P4 to execute the reverse-polarity condition", res.log)
-        prompt(f"Reverse PSU polarity at {IN_CONN}. Verify wiring. Type 'ok'.", res.log)
-
-        # Step 8 - Turn PSU ON and ramp 1 V -> 28 V while monitoring current to find the threshold
-        step_progress(8, "Turn PSU ON and ramp 1 V -> 28 V while monitoring current to find the threshold", res.log)
-        trip_v = ramp_until_current_threshold(res, psu if PSU_REMOTE else None, scope if SCOPE_REMOTE else None)
-
-        # Step 9 - Record the first voltage where current exceeds 100 mA as {0} for evaluation
-        step_progress(9, "Record the first voltage where current exceeds 100 mA as {0} for evaluation", res.log)
-        res.measurements[0] = trip_v
-
-        # Step 10 - Save screenshot; restore safe state (PSU OFF, normal polarity) to leave hardware safe
-        step_progress(10, "Save screenshot; restore safe state (PSU OFF, normal polarity) to leave hardware safe", res.log)
+        # Step 6 - Save screenshot and restore safe state
+        step_progress(6, "Save screenshot and restore safe state", res.log)
         fname = "seq1_current_threshold.png"
-        if PSU_REMOTE and SCOPE_REMOTE:
+        if SCOPE_REMOTE and scope:
             with open(fname, "wb") as f:
                 f.write(scope.screenshot_png())
         else:
-            prompt(f"Save a scope screenshot named exactly '{fname}'. Type 'ok' after saving.", res.log)
+            prompt(f"Save a scope screenshot named '{fname}'. Type 'ok'.", res.log)
         res.add_evidence("Current threshold waveform", fname, meas_id=0)
 
-        # Safe state: PSU OFF and normal polarity
-        if PSU_REMOTE:
+        if PSU_REMOTE and psu:
             psu.output(PSU_CHANNEL, False)
         else:
             prompt("Turn PSU OUTPUT OFF.", res.log)
-        prompt(f"Restore normal polarity at {IN_CONN}. Type 'ok' when safe.", res.log)
+        prompt("Restore normal polarity at P4. Type 'ok'.", res.log)
 
-        # Verdicts from rule
-        res.verdicts[1] = "PASS" if _eval_rule(RULES[1], res.measurements) else "FAIL"
+        res.verdicts[1] = eval_rule_best_effort(RULES[1], res.measurements)
+        finalize_partial_results(res, missing_verdict="SKIP")
 
         res.print_json()
         return res
 
-    except Exception as e:
-        res.log.append(f"EXCEPTION: {e}")
-        res.log.append(f"TRACEBACK: {traceback.format_exc().splitlines()[-1]}")
-        res.verdicts[1] = "FAIL"
+    except BaseException as e:
+        try:
+            res.verdicts[1] = eval_rule_best_effort(RULES[1], res.measurements)
+        except Exception:
+            pass
+        finalize_partial_results(res, exc=e, missing_verdict="SKIP")
         res.print_json()
         return res
 
     finally:
+        checkpoint_results(res, json_path="results.json", html_path="results.html")
         try:
-            if PSU_REMOTE and psu: psu.output(PSU_CHANNEL, False)
-        except Exception: pass
+            if PSU_REMOTE and psu:
+                psu.output(PSU_CHANNEL, False)
+        except Exception:
+            pass
         try:
-            if scope: scope.close()
-        except Exception: pass
+            if scope:
+                scope.close()
+        except Exception:
+            pass
         try:
-            if psu: psu.close()
-        except Exception: pass
+            if psu:
+                psu.close()
+        except Exception:
+            pass
+
 
 if __name__ == "__main__":
+    # results.json/results.html are written by checkpoint_results() in finally
     run_test()
-
 ```
 
-### Profiles
-This guide is device‑agnostic. Device‑specific behaviors are defined in external **Device Profile** documents. The active profile is selected during preflight via `{DEVICE_PROFILE}` and applied at code‑emission time. Do not guess defaults; if unspecified, ask the user. 
-
 ## Preflight and Per‑Device Declarations
+
+0. **Device profile selection (mandatory)** — Collect `{DEVICE_PROFILE}` (e.g., `"NONE"`, `"DRIVER_X"`). The selected profile defines controller token grammar/semantics and any required parameters. If missing, ask only for `{DEVICE_PROFILE}`.
 
 1. **Remote/manual defaults (mandatory)** – Do not ask the user to choose remote vs manual. If the user did not explicitly request remote automation for a device, treat it as **manual** by default.
    - Set all `<DEVICE>_REMOTE = False` by default.
    - Set all `<DEVICE>_VISA = None` by default.
    - Do not emit any meta‑remarks or warnings in the generation response about missing remote/manual declarations.
-   - If the user explicitly requests remote automation for a device, set `<DEVICE>_REMOTE = True` but still do not ask for connection details. Keep `<DEVICE>_VISA = None` and rely on the startup check to force the user to fill it before remote control can run.
-
-**Device profile selection (mandatory).** Collect `{DEVICE_PROFILE}` (e.g., `"NONE"`, `"DRIVER_X"`). The executor must apply the selected profile’s argument semantics, connection defaults, required parameters, and logging rules.
+   - If remote automation is explicitly requested: set `<DEVICE>_REMOTE = True`, keep `<DEVICE>_VISA = None` (startup check enforces user edit).
 
 2. **No equipment interrogation (mandatory)** – Do not ask for vendor/model/connection/protocol/VISA details in chat. Remote automation, if enabled, must be achieved by the user editing the generated script parameter block.
 
-   For the controller interface, collect the link parameters required by the **active device profile** (e.g., port, baud, timeout) and whether microcontroller commands will be executed automatically or manually.
-
-3. **Missing parameters** – All required parameters (instrument addresses, channel numbers, timeouts, target values, etc.) must be stored as variables in the generated script. If any remain `None` after generation, the script shall run a startup check and raise an error listing the missing values. Include any **profile‑required** parameters declared by the active `{DEVICE_PROFILE}`.
+3. **Missing parameters** – All required parameters (including **profile‑required** controller link params) must be variables in the generated script. If any remain `None`, the startup check must raise an error listing them.
    - **Timeout default:** If a timeout parameter is required, default it to **5 seconds** (e.g., `*_TIMEOUT_MS = 5000` or `*_TIMEOUT_S = 5.0`).
 
 4. **No runtime prompts for equipment details** – Once the script is generated, it must **never** prompt the operator for connection details.  Only prompts for measurements or manual actions are permitted at runtime.
@@ -827,28 +794,7 @@ When multiple measurements must be taken on the same physical node using differe
         log.append(msg)
     ```
 
-- **No silent channel mapping**:
-   - The generator must never infer that a board connector (Pnn, Jnn, etc.) is driven by a
-      particular PSU channel unless the procedure explicitly instructs to connect it.
-   - If a voltage change is ordered on a connector with no actuator previously declared,
-      stop and mark the step AMBIGUOUS. Ask the user which supply or source is intended and
-      where it is wired before generating any code.
-
-- **No measurement without declared driver**:
-   - Before generating code for any measurement on a node that requires a stimulus (e.g., “Measure … on P21”,
-      “Measure … on TP_x” where TP_x is expected to be powered), the generator must confirm that a prior step
-      explicitly wired and configured the actuator (PSU/AWG/jumper/microcontroller) for that node.
-   - If no such step exists, mark the measurement AMBIGUOUS and prompt the user to specify the actuator and wiring.
-
-- **Ban on name-based actuator inference**:
-   - The generator must never decide that a TP belongs to the controller or a PSU because of its label.
-
-   - The decision of which actuator drives a node must come only from an explicit step
-      in the procedure, not from guessing based on naming conventions.
-   - If no actuator is specified, stop and return the step as AMBIGUOUS.
-
-
-- **Remote vs manual** – For instruments declared **remote**, translate configuration, stimulus, and measurement steps into SCPI commands.  For instruments declared **manual**, insert clear prompts telling the operator what to do (connect a probe, set a voltage, measure a value).  Do not generate SCPI commands for manual devices.
+- **No actuator inference (mandatory)** – Do not infer what drives a node (PSU/channel/controller/etc.). Require explicit wiring/configuration steps; otherwise mark the step AMBIGUOUS and ask. (See **Node and Pin Handling** for the full actuator/ambiguity rules.)
 
 - **Probe connection requirement**:
    - For every oscilloscope measurement step, the script must first emit a manual operator prompt
@@ -906,47 +852,25 @@ All device‑specific behaviors (command protocol, scaling, defaults, required p
 
 ## Trigger, Capture and Channel Visibility Policies
 
+- **Acquisition mode is literal (mandatory)**:
+  - If a step says SINGLE: call `scope.single()` at that step.
+  - If a step says NORM: do not call `single()`.
+  - If a step says AUTO: do not wait for a trigger.
 
+- **Single-shot handling (mandatory, non-reordering)**:
+  - `single()` both selects *Single* sweep and arms the acquisition. Do not call `set_trigger_sweep(SINGLE)` in the same sequence.
+  - Arm early, wait late: after arming SINGLE, execute intervening steps exactly as written. Wait only at the first frame-dependent operation (measure/screenshot/waveform read).
+  - Deferred-wait sequence (once per armed single):
+    1) `ok = scope.wait_for_single_acq_complete(timeout_ms)`
+    2) If not ok and the step text permits forced/manual capture: `scope.force_trigger()` once, then wait again
+    3) Proceed with the frame-dependent operation
+  - Manual scope path: prompt the operator to arm SINGLE at the authored step; later (at the first frame-dependent operation) prompt to capture/save the screenshot using the canonical filename.
+  - Never insert `set_trigger_sweep(SINGLE)` before or after `single()`. Use `set_trigger_sweep(AUTO|NORM)` only when the procedure explicitly calls for continuous or normal sweep.
 
-
- - **Single-shot handling (canonical, non-reordering)**:
-
-   - `single()` both selects *Single* sweep and arms the acquisition. Do **not** call `set_trigger_sweep(SINGLE)` in the same sequence.
-
-   - This rule does **not** supersede or reorder the procedure steps. It only defines how to handle trigger events when the test specifies *Single*.
-
-   - **Arm early, wait late.**  
-     Call `single()` at the step where the test arms the scope. Perform all intermediate actions exactly as written.  
-     Wait only when the first *frame-dependent* operation occurs (e.g. `measure`, `screenshot`, `waveform read`).
-
-   - **Deferred-wait sequence** (applied only once per armed single):
-     1) `ok = scope.wait_for_single_acq_complete(timeout_ms)`  
-     2) If not ok: `scope.force_trigger()` once, then `wait_for_single_acq_complete(timeout_ms)` again.  
-     3) Proceed with the frame-dependent operation.
-
-   - Never insert `set_trigger_sweep(SINGLE)` before or after `single()`.  
-     Use `set_trigger_sweep(AUTO|NORM)` only when the test explicitly calls for continuous or normal sweep.
-
-   - **Single mode, manual path** — When the test specifies SINGLE and the scope is manual:
-    instruct the operator to arm SINGLE at the authored step, perform any intervening actions exactly
-    as written, then at the first frame-dependent operation instruct the operator to capture the frame
-    and save the screenshot using the canonical filename. Do not reorder steps. (API constraint: operations
-    that consume a frame require a completed acquisition).
-
-
-- **Acquisition semantics (explicit, mode-honoring)**:
-
-	- Mode is literal. If a step says SINGLE, arm with single(). If it says NORM, do not call single(). If it says AUTO, do not wait for a trigger.
-
-	- When to wait. Only wait for a fresh acquisition when the step text includes any of: capture, acquire, save screenshot, freeze, measure from frozen frame. Otherwise do not wait.
-
-	- Defer waits. After arming SINGLE or setting NORM, execute all intervening actions exactly as written (e.g., IO toggles, PSU changes, probe moves). Call wait_for_single_acq_complete(...) only at the first step that says to capture/acquire/save/measure-from-frozen.
-
-	- Force policy. Call force_trigger() only if the step text permits manual/forced capture (e.g., “trigger manually if it didn’t,” “force trigger”). If not permitted, do not force; log timeout and proceed per step.
-
-	- No status polling. Do not call get_trigger_status(); the driver clears latched status internally on set_trigger_sweep(...) and single().
-
-	- Do not upconvert. If a step set NORM, never insert single(). If a step set AUTO, never insert waits or forces.
+- **Wait/force policy (mandatory)**:
+  - Wait only when the step text includes capture/acquire/save screenshot/freeze/measure-from-frozen.
+  - Force trigger only if the step text permits it; otherwise log timeout and proceed per step.
+  - Do not poll trigger status (`get_trigger_status()`).
 
 - **Serial/bus capture ordering.** For serial or bus‑interface tests (e.g., UART, RS422, SPI, I²C), configure and arm the oscilloscope **before** enabling or transmitting interface traffic. Order: scope setup → trigger arm → controller/SCPI stimulus.
 
@@ -965,16 +889,7 @@ If a referenced channel is undefined or unavailable, mark the step AMBIGUOUS.
 
 ## SCPI and Equipment API Guidelines
 
-- **APIs**: Use instrument APIs/SCPI only when remote automation is explicitly enabled for that device (`<DEVICE>_REMOTE = True`). Naming an instrument in the procedure does not imply remote control.
-
-- **Raw pyVISA** – Use the `pyvisa` library and raw SCPI commands to control instruments.  Do not wrap these calls in custom helper classes.  Each SCPI snippet must perform a single atomic action: connect, configure, arm, poll, measure scalar, capture screenshot, set voltage/current, toggle output, etc.
-
-- **No instrument detail questions** – Do not ask the user for vendor/model/connection/protocol/VISA details. Leave connection variables (e.g., `*_VISA`) as `None` unless the user already provided values.
-
-- **Cheat‑sheets** – When possible, refer to vendor‑specific cheat‑sheets for common instruments (e.g. Rigol DS/MSO scopes, Keysight InfiniiVision scopes, Rigol or Keysight PSUs) to determine the correct SCPI commands.  If the necessary commands are unknown, ask the user or use general SCPI (IEEE 488.2) where applicable.
-
-- **Instrument isolation** – SCPI snippets must not start or stop other instruments unless explicitly requested in the procedure.  For example, do not switch the PSU on/off except when instructed.  Focus each snippet on the instrument in question.
-- **PSU current-limit default.** If `{ILIM}` is not provided in the test procedure, configure the supply to its **maximum current limit** (e.g., `SOUR:CURR MAX`). Do not fail startup on a missing `{ILIM}`.
+- Remote instrument control policy: see **Façade first, raw SCPI only as fallback**.
 
 ## Measurement Methods and Screenshots
 
@@ -1035,22 +950,30 @@ When a status signal such as power good (PG) is declared as a microcontroller IO
 Use a robust unit‑parsing mechanism for operator inputs:
 
 - Accept SI prefixes (y, z, a, f, p, n, µ/u, m, k, M, G, T, P, E, Z, Y) in either uppercase or lowercase.  
-- Accept unit symbols like V, A, Ω/ohm, W, s (seconds), Hz, etc.  Variants such as “Ohm”, “ohms”, and plural forms are also valid.  
-- If the user enters a number without units and the context implies the unit (e.g. time for a rise‑time measurement), interpret the number in that unit.  
+- Accept unit suffixes (any letters/`Ω`/`µ` etc.). The helper returns a float only (unit label is not preserved). Apply SI prefix scaling:
+  - Prefix-only suffix (e.g., `10m`, `47u`).
+  - Prefix + any unit text (e.g., `10mV`, `10ms`, `10kHz`, `5kΩ`) — apply the prefix from the first character and ignore the rest.
+- If the user enters a number without units, treat it as already in the base unit implied by the prompt (typically V/A/s).
 - Accept scientific notation (e.g. “1.23e‑3”) and European decimal comma (e.g. “1,23e‑3”).  
-- Store all values internally in base SI units (e.g. volts, amperes) and display them in engineering notation with three significant digits by default.  
+- Store all values as floats.
 - If the input is invalid, prompt the operator again rather than aborting the test.  Use prompt() and read_measurement() that retries until the input parses successfully. Invalid entries are not accepted.
 
 
 ## Tests Common Checklist
 
-- **Per‑device remote/manual default**: – Do not ask the user to choose remote vs manual. If not explicitly requested, default to manual (`<DEVICE>_REMOTE = False`) and do not emit any warnings/remarks about missing declarations.
+- **Remote/manual defaults**: see **Preflight and Per-Device Declarations**.
+
+- **1:1 step execution (mandatory)**: Implement every expanded procedure step in authored order. Do not reorder/merge/omit steps. Do not use `...` placeholders.
+
+- **Step markers + runtime banners (mandatory)**: For every expanded step `N`, emit:
+  - `# Step N - <what & why>` comment directly above the step implementation
+  - `STEP N - <what & why>` runtime banner (printed + appended to `res.log`)
 
 - **Default to manual measurements**: – If no instrument is declared for a required measurement, the script must prompt the operator to measure manually.  Do not attempt to guess instrument parameters.
 
 - **SI unit handling**: – For operator inputs, use `read_measurement()` with the robust units rules above.  Always normalise units and apply SI prefixes correctly.
 
-- **Success criteria**: – Evaluate success conditions using the IDs specified in the test (e.g. `{1}`, `{2}`) and the tolerances or comparison operators given.  Support inclusive ranges (target ± tolerance), less‑than (<), greater‑than (>), and other simple comparisons.  Record PASS or FAIL for each ID.
+- **Success criteria**: Evaluate success conditions by building `RULES`/`criteria` (criterion ids) that reference measurement placeholders `{n}` via `ref`/`refs`. Compute PASS/FAIL/SKIP per criterion id and store under `res.verdicts[criterion_id]`.
 - **Success-condition engine.**: Evaluate numerics exactly as written. Support arithmetic on IDs (e.g., {i}-{j}, {i}/{j}). Conditions that cannot be evaluated in code must be represented as operator_decision and resolved by an operator prompt.
 - **Success-condition completeness.**: Every referenced ID must map to either (a) a machine-evaluated numeric rule or (b) an operator_decision. If any ID lacks one of these, stop code generation and prompt to complete the criteria.
 
@@ -1139,37 +1062,56 @@ stim1_waveform.png, ripple_ch2_steady.png, stim2_ripple.png, stim2_rise.png, q26
 
 4. **Canonical sequence** – Perform the test steps in order: ensure the PSU is off, instruct the operator to connect probes/instruments, turn the PSU on, enable signals, inject stimuli, perform measurements, etc. Use SCPI for remote instruments and operator prompts for manual actions. For controller actions, use the selected controller driver pack rules. If controller parameters are missing, fail startup. After each oscilloscope measurement, take a screenshot.
 
-5. **Evaluating results** – For each measurement ID, compare the measured value to its target and tolerance to determine PASS or FAIL. Store each verdict, measured value, and screenshot filename in the result object.
+5. **Evaluating results** – For each criterion id (keys of `RULES`/`criteria`), compare the referenced measurement(s) (`ref`/`refs`) to determine PASS/FAIL/SKIP. Store verdicts under `res.verdicts[criterion_id]` and measured values under `res.measurements[meas_id]`.
 
 6. **Logging and return** – Maintain a log of every controller command and response. At the end of the test, return a result structure that includes:
 - The sequence of actions and prompts executed.
 - Each measurement value keyed by its ID.
-- The PASS/FAIL/SKIPPED verdict for each ID.
+- The PASS/FAIL/SKIP verdict for each **criterion id** (keys of `RULES` / `criteria`).
 - The log of controller commands and responses.
 
 ### 6.1) Exception handling (mandatory)
-- Any unhandled exception during the test body **must**:
-  1. Append two log entries: `EXCEPTION: <message>` and `TRACEBACK: <last traceback line>`.
-  2. Force failure by inserting `verdicts[0] = "FAIL"` (reserved synthetic rule id `0`).
-  3. Print results using the standard block (`RESULTS:` then `json.dumps(res.to_json(), indent=2)`) and exit the test function.
-- This guarantees `overall = "FAIL"` under error conditions. A test that raised an exception **must not** report `PASS`.
+- Any unhandled termination of the test body MUST be caught so operator stop events still yield a report. Use `except BaseException as e:` (covers stop events like `KeyboardInterrupt` / `CTRL_BREAK_EVENT` / `SystemExit` / `EOFError`, and also unexpected errors).
+
+- The script MUST classify the termination:
+  - Stop events (`KeyboardInterrupt`, `SystemExit`, `EOFError`) → mark the run as **ABORTED** (`res.aborted = True`).
+  - Any other exception → mark the run as **ERROR** (`res.error = True`).
+
+- On abort/error, the script MUST:
+  1. Record exception metadata on `Result` (e.g., `exception_type`, `exception_message`, `traceback_last`) and append two log entries:
+     - `ABORTED: <ExcType>: <message>` or `ERROR: <ExcType>: <message>`
+     - `TRACEBACK: <last traceback line>`
+  2. Compute best-effort criterion verdicts from whatever measurements exist:
+     - Missing required input(s) → criterion verdict MUST be `SKIP`.
+     - Never overwrite an existing operator decision verdict.
+  3. Print results using `res.print_json()` and return `res`.
+
+- The script MUST NOT set `overall` directly.
+  - `Result.overall` is computed as `ABORTED` if `res.aborted == True`, `ERROR` if `res.error == True`, otherwise the criteria aggregate (`PASS`/`FAIL`/`SKIP`/`PARTIAL`).
+  - `Result.criteria_overall` always reports the criteria aggregate, even when the run is `ABORTED`/`ERROR`.
+
+- Recommended helper: `finalize_partial_results(res, exc=e, missing_verdict="SKIP")` records execution state and fills missing verdict keys to `SKIP` without assuming any criterion semantics.
+
 - Resource shutdown still executes in `finally` and must not `return`.
 
-> Implementation note: the JSON schema and dual-output contract remain unchanged; exceptions are recorded only in `log`, and the synthetic verdict enforces failure aggregation.
+> Implementation note: exceptions are recorded in both `Result` fields (e.g., `aborted`, `error`, `exception_*`) and `log`. The JSON schema is extended accordingly.
 
 ### 6.2) Resource cleanup (mandatory)
 - Wrap the main test body in `try: … finally: …`. The `finally` block **must** run even if the function executes `return` earlier.
 - Required actions in `finally`:
+  0) Persist partial results **before** any blocking safe-state prompts.
   1) Put instruments in a safe state (outputs OFF) if they were enabled.  
   2) Close controller and all remote instruments that were opened.  
   3) Guard each shutdown with `try/except` to avoid masking prior results.
 - Do not `return` from `finally`.
+- Limitation: this cannot be guaranteed for hard-kill (e.g., SIGKILL) or power loss.
 
 **Template:**
 ```python
 res.print_json()
 return res
 finally:
+    checkpoint_results(res, json_path="results.json", html_path="results.html")
     try:
         if ELOAD_REMOTE: el.set_output(ELOAD_CHANNEL, False)
     except Exception: pass
@@ -1190,11 +1132,11 @@ finally:
     except Exception: pass
 ```
 
-
 7. **Requirements and Post-test actions.** Treat these sections as **verbatim operator information**. Do not synthesize or convert them into SCPI/controller commands unless the contents are also present as explicit **Test steps**. Otherwise, display or log them unchanged.
 
 ### Façade first, raw SCPI only as fallback
 
+- **Remote gate:** Use instrument APIs/SCPI only when `<DEVICE>_REMOTE = True`. Naming an instrument in the procedure does not imply remote control.
 - **Default:** Use the instrument façades for all actions:
   - `PowerSupply` for PSU
   - `ElectronicLoad` for e-load
@@ -1202,10 +1144,14 @@ finally:
 - **Fallback rule:** Use raw SCPI (`write_raw` / `query_raw`) only when the façade lacks the required method for a step written in the test.
 - **Do not mix for one action:** For any single step, choose façade **or** raw. Never both.
 - **Atomicity**: Do not chain multiple instrument actions on a single line. One call per line to improve auditability and diffs.
+- **Raw SCPI constraints:** Do not wrap raw SCPI in custom helper classes. Each raw-SCPI snippet performs one atomic action (connect/configure/arm/poll/measure/capture/toggle).
 - **Order preservation:** Raw SCPI must keep the exact step order. No reordering to “prepare” or “optimize.”
 - **Error handling:** Wrap raw SCPI in try/except; on error, fail the test with the command string included in the message.
 - **Logging:** Log each raw command and response in `controller_log`/instrument log so evidence shows what ran.
 - **Surface new needs:** If a raw command is used, add a `# TODO: add façade method <name>(...)` comment right above it.
+- **Cheat-sheets:** Use vendor cheat-sheets for SCPI; if unknown, ask the user or use IEEE 488.2 where applicable.
+- **Instrument isolation:** Raw SCPI must not affect other instruments unless the procedure says so.
+- **PSU current-limit default:** If `{ILIM}` is missing, set current limit to MAX (e.g., `SOUR:CURR MAX`). Do not fail startup for missing `{ILIM}`.
 
 #### Code mapping template
 
@@ -1228,11 +1174,13 @@ except Exception as e:
 ### Verification View (step ↔ code mapping)
 Emit the **verification view** only when the user explicitly asks for it (e.g., they request "verification view", "step ↔ code mapping", or "per-step mapping output"). By default, do not emit the verification view.
 
-Requirements (only when requested):
+Note: step markers and 1:1 step execution are mandatory regardless of whether the verification view is emitted.
+
+Verification view requirements (only when requested):
 - **Request gate:** If the user did not ask for the verification view, do not output it (no placeholder section).
-- **Step markers:** The generated code must include a step-marker comment line for every expanded procedure step `N` in authored order.
-  - **Extractor matching:** A step marker is identified by the exact prefix `# Step N` (with `N` as a base-10 integer). The extractor may ignore any suffix text after `# Step N`.
-  - **Canonical form:** Use `# Step N - <what & why>` as the step-marker line.
+- **Step markers (extraction contract):** The verification view extracts code blocks using step-marker comment lines.
+  - A step marker is identified by the exact prefix `# Step N` (with `N` as a base-10 integer). The extractor may ignore any suffix text after `# Step N`.
+  - Canonical form: `# Step N - <what & why>`.
 - **Per-step mapping output:** After code generation, output a per-step view where each section contains:
   - `STEP N: <verbatim step text>`
   - the code block associated with the step-marker line whose prefix matches `# Step N` (from that marker line up to, but not including, the next step-marker line whose prefix matches `# Step (N+1)`)
@@ -1245,9 +1193,7 @@ Requirements (only when requested):
 
 The executor must both **return** a `Result` object **and** print a canonical JSON block. The JSON is the source of truth for external harnesses.
 
-#### What to emit
-1. Call `res.print_json()` which prints a line `RESULTS:` followed by `json.dumps(res.to_json(), indent=2)`.
-2. Then `return res`.
+Emit results by calling `res.print_json()` immediately before `return res` (also on abort/error paths).
 
 #### JSON schema (exact)
 ```json
@@ -1258,30 +1204,20 @@ The executor must both **return** a `Result` object **and** print a canonical JS
   "criteria": { "<rule_id>": { /* expanded rule */ } },
   "evidence": [ { "label": "<name>", "file": "<path>", "meas_id": <int|null> } ],
   "log": [ "<ordered messages>" ],
-  "overall": "PASS" | "FAIL" | "SKIP" | "PARTIAL"
+  "aborted": <true|false>,
+  "error": <true|false>,
+  "exception_type": "<string>",
+  "exception_message": "<string>",
+  "traceback_last": "<string>",
+  "criteria_overall": "PASS" | "FAIL" | "SKIP" | "PARTIAL",
+  "overall": "PASS" | "FAIL" | "SKIP" | "PARTIAL" | "ERROR" | "ABORTED"
 }
 ```
 
 ##### Rules
-- **Dual output.** Both the `return`ed `Result` and the printed JSON are required. Any divergence from the schema is a violation.
-- **Measurements.** Numeric values are in base SI units; strings may be used for free-text notes and for machine-collected message payloads (UART/CAN/etc.).
-- **Verdicts.** Only `PASS`, `FAIL`, `SKIP`.
-- **Criteria.** Expanded form produced by the rules engine.
-- **Evidence.** Each item links a file to a label, with optional `meas_id` to bind it to a measurement. For scope measurements, include at least one evidence item (screenshot) and set `meas_id` to the corresponding ID.
-- **Log.** Chronological operator prompts, inputs, controller commands, and responses.
-- **Overall aggregation.**
-  1) Any `FAIL` → `overall = "FAIL"`
-  2) All `SKIP` → `overall = "SKIP"`
-  3) All `PASS` → `overall = "PASS"`
-  4) Mix of `PASS` and `SKIP` → `overall = "PARTIAL"`
-
-#### Minimal code obligations
-- `Result` implements:
-  - `overall` as a computed property (no manual setting)
-  - `to_json()` that emits the exact schema above
-  - `print_json()` that prints the canonical JSON block
-  - `add_evidence(label: str, path: str, meas_id: int | None = None)` to append one evidence item
-- The main test function calls `res.print_json()` immediately before `return res`.
+- **Dual output.** Both the `return`ed `Result` and the printed JSON are required.
+- **Verdicts.** Only `PASS`, `FAIL`, `SKIP`. Verdict keys are criterion ids (keys of `criteria` / `RULES`).
+- **Execution flags.** On early stop: set `aborted` or `error` and populate `exception_*` fields.
 
 
 
@@ -1306,7 +1242,7 @@ Define success criteria in a single `RULES` dict. Each entry targets one measure
   - Collect observation (free text) for `{n}` (may be empty).
   - Ask: `Is the result for {n} "<TEXT>"? [y/n/skip]:`.
   - Use `operator_judgment(n, "<TEXT>", log)` when available.
-  - Store the operator verdict under `verdicts[{n}]` (measurement-linked), even if the `RULES` entry uses a different rule id with `ref: n`.
+  - Store the operator verdict under `verdicts[<criterion_id>]` (criterion-keyed). Measurement IDs remain in `measurements[...]` and are linked from criteria via `criteria[<criterion_id>]["ref"] = n` (single ref) or `criteria[<criterion_id>]["refs"] = [i, j, ...]` (multi-ref).
 - **Deterministic (machine-collected string):** If `{n}` is read automatically (driver/bus/UART/CAN/etc.), then `{n} = <TEXT>` is evaluated in code, not by operator judgment:
   - Compare `measured.strip()` to `expected.strip()` for exact matches.
   - Treat `<TEXT>` as a regex only when authored as `/.../`; evaluate with `re.search(pattern, measured.strip())`.
@@ -1328,7 +1264,7 @@ Example {7},{8},{9} < limits °C above ambient {700} →
 
 {"type":"lt_abs_expr","refs":[7,700],"limit":60.0}
 Expansion occurs once before verdicts.
-Missing prerequisites → mark that rule FAIL and log cause.
+ Missing prerequisites → mark that rule SKIP and log cause.
 
 #### ID mapping
 - Every measurement placeholder `{n}` in the procedure must map to exactly one rule entry (numeric or `operator_decision`).
@@ -1343,8 +1279,10 @@ Missing prerequisites → mark that rule FAIL and log cause.
 #### Units
 - Preserve units in `expr` and `units`. Engine compares numerically in base SI. Do not coerce mismatched units.
 
-#### Reserved, completeness, and failure forcing
-- Reserve rule id `0` for synthetic FAIL on exceptions. The runner sets `verdicts[0]="FAIL"` when an error occurs.
+#### Reserved, completeness, and run-status forcing
+- Do not force overall status by inserting synthetic verdict entries. Use `Result` execution flags instead:
+  - On stop events: set `res.aborted = True` (overall becomes `ABORTED`).
+  - On unexpected exceptions: set `res.error = True` (overall becomes `ERROR`).
 - Before execution, expand `RULES` to internal `criteria` and fail fast if any required field is missing.
 
 #### Example
@@ -1375,4 +1313,4 @@ RULES = {
 
 - **Power‑good signals** – If a status signal (e.g. power good) is available as a microcontroller IO, always read it via the controller's interface that IO.  Do not measure it with a scope or ask the operator to observe it.
 
-- **Ask when in doubt** – These rules are strict.  If the test procedure is unclear or missing information, pause and ask the user for clarification.  Never guess or make assumptions.  If instrument commands, connection details, or target values are unknown, you must obtain them before generating or executing code.
+- **Ask when in doubt** – If the procedure is unclear or missing information (steps, IDs, targets, units, `{DEVICE_PROFILE}`), pause and ask the user. Do not ask for connection/VISA details; emit them as `*_VISA = None` and rely on the startup check.

@@ -12,7 +12,7 @@ related:
 related_files:
   - Result.py
   - rules/0.1.0/test_rules_llm_ready.md
-checksum: 16e7afb75bca1c6f36b9d589d7d17a92a7f1cf6e5959e1e335eb6fc47a5973bd
+checksum: 1b63e302f310c764032ab2b7cd1b643ef9824ad10d2fb694b9dd8a7e79f95602
 ---
 """
 """
@@ -25,7 +25,11 @@ and test frameworks to ensure reliable data collection, operator interaction, an
 automated and manual test steps.
 """
 
+import json
 import re
+import traceback
+
+from .Result import Result
 
 
 def prompt(msg: str, log:list) -> str:
@@ -38,15 +42,17 @@ def prompt(msg: str, log:list) -> str:
 def prompt_choice(msg: str, mapping: dict, log:list) -> str:
     while True:
         ans = prompt(msg, log).strip().lower()
-        if ans in mapping: return mapping[ans]
-        str = "Enter one of:", ", ".join(mapping.keys())
-        print(str)
-        log.append(str)
+        if ans in mapping:
+            ret = mapping[ans]
+            return ret if isinstance(ret, str) else str(ret)
+        msg2 = "Enter one of: " + ", ".join(mapping.keys())
+        print(msg2)
+        log.append(msg2)
 
 
 def read_logic_01(msg: str, log: list) -> int:
     """Prompt until the operator enters a strict 0/1 value."""
-    return int(prompt_choice(msg, {"0": 0, "1": 1}, log))
+    return int(prompt_choice(msg, {"0": "0", "1": "1"}, log))
 
 
 _SI = {"y":1e-24,"z":1e-21,"a":1e-18,"f":1e-15,"p":1e-12,"n":1e-9,"u":1e-6,"µ":1e-6,"m":1e-3,
@@ -60,42 +66,28 @@ def parse_quantity(s: str, default_unit: str = "V") -> float:
     val = float(m.group(1))
     unit = (m.group(2) or "").replace("Ohms","Ω").replace("ohms","Ω").replace("Ohm","Ω").replace("ohm","Ω")
 
-    # If only a prefix was given (e.g., "10n"), apply it to the default unit.
+    # Returns float only; unit semantics are not preserved.
+    # Scaling rule:
+    # - If suffix is exactly a supported SI prefix (e.g., "m", "k"), apply it.
+    # - Else if suffix starts with a supported 1-char prefix (e.g., "mV", "ms", "kHz", "MΩ"), apply it and ignore the rest.
+    # - Else return numeric part unchanged.
     if unit in _SI:
         return val * _SI[unit]
 
-    # If a base unit with optional prefix was given.
-    if unit.endswith("V"):
-        pre = unit[:-1]
-        if pre in _SI:
-            val *= _SI[pre]
-        return val
-
-    if unit.endswith("A"):
-        pre = unit[:-1]
-        if pre in _SI:
-            val *= _SI[pre]
-        return val
-
-    # Time unit with optional SI prefix (ms, us, ns, s)
-    if unit.endswith("s") or unit.endswith("S"):
-        pre = unit[:-1]
-        if pre == "":
-            return val
-        if pre in _SI:
+    if unit:
+        pre = unit[:1]
+        if pre in _SI and pre != "":
             return val * _SI[pre]
-        raise ValueError("Unrecognized time unit")
 
-    # Fallback: unrecognized unit, return numeric part unchanged.
     return val
 
 def read_measurement(msg: str, log: list, default_unit: str = "V") -> float:
     while True:
         try: return parse_quantity(prompt(msg, log), default_unit)
         except Exception as e: 
-            str = f"Invalid input: {e}. Use SI units (e.g., 2.40V)."
-            print(str)
-            log.append(str)
+            msg2 = f"Invalid input: {e}. Use SI units (e.g., 2.40V)."
+            print(msg2)
+            log.append(msg2)
 
 
 def operator_judgment(meas_id: int, target: str, log: list) -> tuple[str, str]:
@@ -110,3 +102,92 @@ def operator_judgment(meas_id: int, target: str, log: list) -> tuple[str, str]:
     )
     return observation, verdict
 
+
+def checkpoint_results(res: Result, json_path: str = "results.json", html_path: str = "results.html") -> None:
+    """Best-effort persistence of partial results; never raises."""
+    try:
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(res.to_json(), f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+    try:
+        res.export_html(html_path)
+    except Exception:
+        pass
+
+
+def finalize_partial_results(
+    res: Result,
+    exc: BaseException | None = None,
+    *,
+    kind: str | None = None,
+    missing_verdict: str = "SKIP",
+) -> None:
+    """Finalize Result without constraining criterion logic.
+
+    This helper exists to enforce durable partial reporting behavior without
+    assuming any specific criterion types.
+
+    - If exc is provided, marks execution state (ABORTED or ERROR) and records
+      exception metadata on the Result.
+    - Ensures every criterion id in res.criteria has a verdict key. Missing
+      verdicts become missing_verdict (default: SKIP).
+    - Never raises.
+    """
+    try:
+        mv = str(missing_verdict or "SKIP").strip().upper()
+        if mv not in ("PASS", "FAIL", "SKIP"):
+            mv = "SKIP"
+
+        if exc is not None:
+            try:
+                inferred = "ABORTED" if isinstance(exc, (KeyboardInterrupt, EOFError, SystemExit)) else "ERROR"
+                k = str(kind or inferred).strip().upper()
+                if k not in ("ABORTED", "ERROR"):
+                    k = "ERROR"
+
+                res.aborted = (k == "ABORTED")
+                res.error = (k == "ERROR")
+            except Exception:
+                pass
+
+            try:
+                res.exception_type = type(exc).__name__
+                res.exception_message = str(exc)
+            except Exception:
+                pass
+
+            try:
+                tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
+                res.traceback_last = tb_lines[-1].strip() if tb_lines else ""
+            except Exception:
+                pass
+
+            try:
+                prefix = "ABORTED" if getattr(res, "aborted", False) else "ERROR"
+                res.log.append(f"{prefix}: {type(exc).__name__}: {exc}")
+                if getattr(res, "traceback_last", ""):
+                    res.log.append(f"TRACEBACK: {res.traceback_last}")
+            except Exception:
+                pass
+
+        # Normalize existing verdict tokens; fill missing verdicts with mv.
+        try:
+            for k, v in list((res.verdicts or {}).items()):
+                if isinstance(v, str):
+                    v_up = v.strip().upper()
+                    if v_up in ("PASS", "FAIL", "SKIP"):
+                        res.verdicts[k] = v_up
+        except Exception:
+            pass
+
+        try:
+            for crit_id in (res.criteria or {}).keys():
+                if crit_id not in res.verdicts:
+                    res.verdicts[crit_id] = mv
+        except Exception:
+            pass
+
+    except Exception:
+        pass

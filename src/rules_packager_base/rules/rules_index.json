@@ -1,22 +1,22 @@
 {
-  "driver_version": "0.1.1",
-  "rules_version": "0.1.1",
+  "driver_version": "0.1.2",
+  "rules_version": "0.1.2",
   "files": [
     {
       "name": "LLM Automated Test Code Generation Gui.md",
-      "sha256": "930294df7e04b2883c4f5cdda68a085fffcce1213e3d5c2184769097b00c1260"
+      "sha256": "b8b7d6f625c192869fcaaed02a0ce4bdeadd6f3ebbc0dc722cb7577fae538aac"
     },
     {
       "name": "Result_API_Contract_v1.md",
-      "sha256": "0d000334d94e1cc90e6f1ab6b849e8202267cb3302e8a21abaddb1e84211151d"
+      "sha256": "93a8fdb8cf1c7dc55fc29ae802ca63e5c73e366411a528efe79b8595da1eff4a"
     },
     {
       "name": "Test_Helpers_API_Contract_v1.md",
-      "sha256": "b2d5ee3833d3ad0311b768ed52068956f776583e0f17eac68684ba7fa5027f40"
+      "sha256": "f0d729eecb2f1ad490f6abcfc7ff5dc4789a5182e24a35a5cc14f2fa1b32616f"
     },
     {
       "name": "test_rules_llm_ready.md",
-      "sha256": "b9c8748e6a4ed8b26a5a28c4d8bb825e9b8e74da070d239394d19fa856b25c24"
+      "sha256": "c4a703586542aa46699e0bc96a410143ed901c518dbfeef71d6968daa746d7b0"
     }
   ]
 }

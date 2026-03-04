@@ -17,7 +17,7 @@ related_files:
   - rules/0.1.0/Test_Helpers_API_Contract_v1.md
   - rules/0.1.0/LLM Automated Test Code Generation Gui.md
 
-checksum: 0fb76cfbd2ad9d4f9a58fa69b1103a6ad3acc9b6c1147db9efd67ebee91e9770
+checksum: 5d2e2bcf6b21794fc661573db700294b307e1c132ee7f97e74e5afff21879c4a
 ---
 """
 
@@ -47,14 +47,48 @@ class Result:
     log: List[str] = field(default_factory=list)
     evidence: List[Dict[str, Any]] = field(default_factory=list)  # unified
 
+    # Execution state (independent of pass/fail criteria)
+    aborted: bool = False
+    error: bool = False
+    exception_type: str = ""
+    exception_message: str = ""
+    traceback_last: str = ""
+
+    @property
+    def criteria_overall(self) -> str:
+        vals_any = list(self.verdicts.values())
+        if not vals_any:
+            return "SKIP"
+
+        vals: list[str] = []
+        unknown = False
+        for v in vals_any:
+            if not isinstance(v, str):
+                unknown = True
+                continue
+            vals.append(v.strip().upper())
+
+        if not vals:
+            return "PARTIAL" if unknown else "SKIP"
+
+        if any(v == "FAIL" for v in vals):
+            return "FAIL"
+        if all(v == "SKIP" for v in vals):
+            return "SKIP"
+        if all(v == "PASS" for v in vals):
+            return "PASS"
+        if all(v in ("PASS", "SKIP") for v in vals):
+            return "PARTIAL"
+        return "PARTIAL"
+
     @property
     def overall(self) -> str:
-        vals = list(self.verdicts.values())
-        if not vals: return "SKIP"
-        if any(v == "FAIL" for v in vals): return "FAIL"
-        if all(v == "SKIP" for v in vals): return "SKIP"
-        if all(v == "PASS" for v in vals): return "PASS"
-        return "PARTIAL"
+        # Execution status overrides criteria aggregation.
+        if self.aborted:
+            return "ABORTED"
+        if self.error:
+            return "ERROR"
+        return self.criteria_overall
 
     def add_evidence(self, label: str, path: str, meas_id: Optional[int] = None):
         self.evidence.append({"label": label, "file": path, "meas_id": meas_id})
@@ -67,6 +101,12 @@ class Result:
             "criteria": self.criteria,
             "evidence": self.evidence,
             "log": self.log,
+            "aborted": self.aborted,
+            "error": self.error,
+            "exception_type": self.exception_type,
+            "exception_message": self.exception_message,
+            "traceback_last": self.traceback_last,
+            "criteria_overall": self.criteria_overall,
             "overall": self.overall,
         }
 
@@ -94,15 +134,33 @@ class Result:
         # Convenience aliases
         test_name = self.test_name or "Unnamed test"
         overall = self.overall or "UNKNOWN"
-        criteria: Dict[str, Any] = self.criteria or {}
-        measurements: Dict[str, Any] = self.measurements or {}
-        verdicts: Dict[str, Any] = self.verdicts or {}
-        log_entries: List[Any] = self.log or []
+        criteria_overall = self.criteria_overall or "UNKNOWN"
+        criteria: Dict[int, Dict[str, Any]] = self.criteria
+        measurements: Dict[int, Any] = self.measurements
+        verdicts: Dict[int, str] = self.verdicts
+        log_entries: List[Any] = self.log
+
+        exec_details_html = ""
+        if self.aborted or self.error:
+            details = "\n".join(
+                [
+                    f"exception_type: {self.exception_type}" if self.exception_type else "",
+                    f"exception_message: {self.exception_message}" if self.exception_message else "",
+                    f"traceback_last: {self.traceback_last}" if self.traceback_last else "",
+                ]
+            ).strip()
+            if details:
+                exec_details_html = f"""
+  <section>
+    <h2>Execution Details</h2>
+    <pre>{escape(details)}</pre>
+  </section>
+"""
 
         # Extract "Step ..." entries as procedure
         steps: List[str] = []
         for entry in log_entries:
-            if isinstance(entry, str) and entry.startswith("Step"):
+            if isinstance(entry, str) and (entry.startswith("STEP ") or entry.startswith("Step ")):
                 steps.append(entry)
 
         # Build rows for the requirements table
@@ -111,13 +169,37 @@ class Result:
             expr = crit.get("expr", "")
             units = crit.get("units", "")
 
-            # measurement id: use ref if present, else criterion id
-            ref_id = crit.get("ref", crit_id)
+            # Measurement display (criterion id and measurement id are independent)
+            meas_val: Any = ""
+            if "ref" in crit:
+                ref_raw = crit.get("ref")
+                ref_id: int | None = None
+                if ref_raw is not None:
+                    try:
+                        ref_id = int(ref_raw)
+                    except Exception:
+                        ref_id = None
+                meas_val = measurements.get(ref_id, "") if isinstance(ref_id, int) else ""
+            elif "refs" in crit:
+                refs = crit.get("refs") or []
+                try:
+                    parts: list[str] = []
+                    for mid_raw in refs:
+                        try:
+                            mid = int(mid_raw)
+                        except Exception:
+                            parts.append(f"{{{mid_raw}}}=")
+                            continue
+                        parts.append(f"{{{mid}}}={measurements.get(mid, '')}")
+                    meas_val = ", ".join(parts)
+                except Exception:
+                    meas_val = ""
+            else:
+                # Fallback for legacy/simple criteria shapes
+                meas_val = measurements.get(crit_id, "")
 
-            meas_val = measurements.get(ref_id, measurements.get(crit_id, ""))
-
-            # verdict: prefer measurement-id verdict, else criterion-id verdict
-            verdict = verdicts.get(ref_id, verdicts.get(crit_id, ""))
+            # Verdicts are keyed by criterion id (no measurement-id fallback)
+            verdict = verdicts.get(crit_id, "")
 
             verdict_class = ""
             if isinstance(verdict, str):
@@ -191,6 +273,22 @@ class Result:
       background: #fde2e2;
       color: #8c1111;
     }}
+    .overall.SKIP {{
+      background: #eee;
+      color: #555;
+    }}
+    .overall.PARTIAL {{
+      background: #fff3cd;
+      color: #6b4c00;
+    }}
+    .overall.ERROR {{
+      background: #ffe5d0;
+      color: #7a3b00;
+    }}
+    .overall.ABORTED {{
+      background: #e6f0ff;
+      color: #003a7a;
+    }}
     .overall.UNKNOWN {{
       background: #eee;
       color: #555;
@@ -259,9 +357,12 @@ class Result:
   <header>
     <h1>{escape(test_name)}</h1>
     <div class="overall {escape(overall)}">Overall: {escape(overall)}</div>
+    <div class="overall {escape(criteria_overall)}">Criteria: {escape(criteria_overall)}</div>
   </header>
 
   {steps_html}
+
+  {exec_details_html}
 
   <section>
     <h2>Requirements and Results</h2>
@@ -308,6 +409,11 @@ class Result:
             criteria=criteria,
             evidence=data.get("evidence", []) or [],
             log=data.get("log", []) or [],
+            aborted=bool(data.get("aborted", False)),
+            error=bool(data.get("error", False)),
+            exception_type=str(data.get("exception_type", "") or ""),
+            exception_message=str(data.get("exception_message", "") or ""),
+            traceback_last=str(data.get("traceback_last", "") or ""),
         )
 
     @classmethod
