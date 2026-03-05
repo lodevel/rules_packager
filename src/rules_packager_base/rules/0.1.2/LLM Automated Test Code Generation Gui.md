@@ -775,6 +775,12 @@ When multiple measurements must be taken on the same physical node using differe
 
 - **1:1 mapping (expanded semantics)** – The script must behave as if it executed each step from the fully expanded procedure in order. When the authored procedure contains macro directives, the generated Python may use loops/conditionals for efficiency, but it must not reorder, merge, omit, or interleave actions relative to the expanded step stream.
 
+- **Step numbering origin (mandatory)** – The step number `N` used in markers and progress banners is the **1-based index of that entry in the procedure's `steps` array** (equivalently, the position shown in the authored procedure list).
+  - **Directive entries consume positions.** Macro directives (`@LET`, `@TABLE`, `@ROW`, `@ENDTABLE`, `@ALLOC`, `@FOR`, `@ENDFOR`, and any future `@`-prefixed directives) each occupy a position in `steps` but do **not** produce a step marker, progress banner, or executable code. They are compile-time metadata.
+  - **Gaps in step numbers are expected.** Because directives consume positions without emitting code, the visible step numbers in the generated script will have gaps (e.g., Steps 1–10 then Steps 24–49). These gaps prove that the numbering is traceable back to the authored procedure.
+  - **Never renumber.** Do not renumber steps to close gaps. A step whose authored position is 24 must appear as `# Step 24 - …` and `step_progress(24, …)`, regardless of how many directives precede it.
+  - **Counting rule for `@FOR` bodies.** When a `@FOR … @ENDFOR` block encloses K runtime steps, each runtime step inside the block retains its authored position number. The `@FOR` line itself and the `@ENDFOR` line each consume one position but produce no marker. Example: if `@FOR` is at position 11 and the block contains steps at positions 12–23 with `@ENDFOR` at position 24, the generated loop body emits Steps 12–23 and Step 24 is consumed by `@ENDFOR` (no marker).
+
 - **Step markers (mandatory)** – For every numbered test step, emit a preceding inline comment in the form `# Step N - <what & why>` directly above the code or prompt that performs the step.
   - **Exact prefix (ASCII):** the marker line must start with `# Step ` + integer `N` + ` - ` (space-hyphen-space). Use the keyboard hyphen `-`.
   - **Single-line description:** `<what & why>` is a single sentence summarizing the operator action and engineering intent; it must not contain newlines.
@@ -798,18 +804,18 @@ When multiple measurements must be taken on the same physical node using differe
   When the procedure contains a repeated/iterated block (macro `@FOR`, explicit loop, or a range shorthand that expands to multiple identical actions), the generated Python **may** use a `for` loop instead of unrolling every iteration into separate code.
 
   Rules for loops:
-  1. **Step numbers inside the loop body must match the authored procedure step numbers.** If the procedure defines steps 5–7 inside a loop of 4 iterations, each iteration emits `step_progress(5, ...)`, `step_progress(6, ...)`, `step_progress(7, ...)`. The same step numbers will therefore appear multiple times in the log — this is expected and correct.
+  1. **Step numbers inside the loop body must match the authored procedure step numbers.** The step number is the 1-based position in the `steps` array (see *Step numbering origin*). If the procedure has directives at positions 11–23 and a `@FOR` body with runtime steps at positions 24–26 iterated 4 times, each iteration emits `step_progress(24, ...)`, `step_progress(25, ...)`, `step_progress(26, ...)`. The same step numbers appear multiple times in the log — this is expected and correct.
   2. **Iteration banner.** At the top of each iteration, before any `step_progress` call, emit an iteration marker so logs are readable:
      ```python
      for i, row in enumerate(table):
          iter_msg = f"--- Iteration {i + 1}/{len(table)} ---"
          print(iter_msg, flush=True)
          res.log.append(iter_msg)
-         # Step 5 - <what & why>
-         step_progress(5, "<what & why>", res.log)
+         # Step 24 - <what & why>
+         step_progress(24, "<what & why>", res.log)
          ...
      ```
-  3. **Do not unroll when a loop is natural.** If the procedure uses a `@FOR` directive or an obvious repeated pattern (e.g., "Repeat steps 5–7 for each row in the table"), emit a Python `for` loop. Do **not** manually unroll it into N×(steps) with fabricated step numbers — that creates a mismatch between the authored procedure numbering and the generated code.
+  3. **Do not unroll when a loop is natural.** If the procedure uses a `@FOR` directive or an obvious repeated pattern (e.g., "Repeat steps 24–26 for each row in the table"), emit a Python `for` loop. Do **not** manually unroll it into N×(steps) with fabricated step numbers — that creates a mismatch between the authored procedure numbering and the generated code.
   4. **Measurement IDs inside loops** must still be unique across all iterations. Use the loop variable to compute the ID offset (e.g., `res.measurements[str(base_id + i)] = value`).
 
 - **No actuator inference (mandatory)** – Do not infer what drives a node (PSU/channel/controller/etc.). Require explicit wiring/configuration steps; otherwise mark the step AMBIGUOUS and ask. (See **Node and Pin Handling** for the full actuator/ambiguity rules.)
