@@ -104,12 +104,12 @@ class FncoreMockupClient:
                     return result
                 # None is considered a failure
                 if attempt < self.max_retries:
-                    self.log.append({"retry": f"Retry {attempt}/{self.max_retries} for {operation_name} (got None)"})
+                    self.log.append(f"RETRY {attempt}/{self.max_retries} [{operation_name}]: got None")
                     time.sleep(self.retry_delay_ms / 1000.0)
             except Exception as e:
                 last_exception = e
                 if attempt < self.max_retries:
-                    self.log.append({"retry": f"Retry {attempt}/{self.max_retries} for {operation_name} (exception: {str(e)})"})
+                    self.log.append(f"RETRY {attempt}/{self.max_retries} [{operation_name}]: {e}")
                     time.sleep(self.retry_delay_ms / 1000.0)
         
         # All retries exhausted
@@ -181,7 +181,7 @@ class FncoreMockupClient:
             else:
                 resp = self._prompt_response_line(allow_empty=allow_empty, default_ok_if_empty=default_ok_if_empty)
 
-            self.log.append({"cmd": line, "resp_echo": "", "resp": resp, "manual": True})
+            self.log.append(f"MANUAL: {line} -> {resp}")
             return resp
 
         self._ensure_open()
@@ -192,7 +192,7 @@ class FncoreMockupClient:
         resp = self._ser.readline()
         resp = resp.decode("ascii", errors="ignore")
         resp = resp.strip() or "OK"
-        self.log.append({"cmd": line, "resp_echo": resp_echo, "resp": resp, "manual": False})
+        self.log.append(f"CMD: {line} | RESP: {resp}")
         return resp
 
     @staticmethod
@@ -223,7 +223,7 @@ class FncoreMockupClient:
                     break
                 else:
                     print(f"Invalid input '{raw}'. Please enter 0 or 1.")
-            self.log.append({"cmd": line, "resp_echo": "", "resp": str(val), "manual": True})
+            self.log.append(f"MANUAL: {line} -> {val}")
             return val
 
         # Automatic mode with retry
@@ -254,14 +254,7 @@ class FncoreMockupClient:
         code = self._dac_code_12bit_3v3(volts)
         line = f"writeAnalog {TARGET} {dac_id} {code}"
         resp = self._write_readline(line, allow_empty=True, default_ok_if_empty=True)
-
-        # Augment last log entry if it's a dict.
-        try:
-            if self.log and isinstance(self.log[-1], dict):
-                self.log[-1].update({"requested_volts": float(volts), "code": int(code)})
-        except Exception:
-            pass
-
+        self.log.append(f"[analog_write] {float(volts)}V -> code {int(code)}")
         return {"cmd": line, "resp": resp, "requested_volts": float(volts), "code": int(code)}
 
     # Analog input
@@ -280,7 +273,7 @@ class FncoreMockupClient:
                 except Exception:
                     continue
 
-            self.log.append({"cmd": line, "resp_echo": "", "resp": str(v), "manual": True})
+            self.log.append(f"MANUAL: {line} -> {v}V")
             return v
 
         # Automatic mode with retry

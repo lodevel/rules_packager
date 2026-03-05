@@ -20,7 +20,7 @@ methods_index:
   - read_analog
   - uart_send
 manual_override_prompt: true
-logging_fields: [cmd, resp, requested_volts, code]
+logging_format: plain_strings
 default_baud: 115200
 timeout_s_default: 2.0
 supports_manual_override: true
@@ -70,7 +70,7 @@ FncoreClient(port, baud, timeout_s, log_list, manual_override=False,
 - `port`: e.g., `"COM7"`, `"/dev/ttyUSB0"`.
 - `baud`: integer. Typical `115200`.
 - `timeout_s`: float seconds for serial read.
-- `log_list`: a Python list that collects dict entries per command.
+- `log_list`: a Python list that collects plain string entries per command (e.g. `"CMD: readDigital DSC IO#DSC18 | RESP: 1"`, `"MANUAL: readDigital DSC IO#DSC18 -> 1"`, `"RETRY 1/3 [read_digital_input on channel IO#DSC18]: got None"`).
 - `manual_override`: if `True`, no serial I/O; prints the exact line and waits for operator confirmation.
 - `max_retries`: number of automatic retries on read failure (default `3`). Set `0` to disable.
 - `retry_delay_ms`: delay in ms between retries (default `50`).
