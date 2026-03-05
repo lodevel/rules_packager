@@ -105,6 +105,31 @@ fn.write_digital("DSC", "IO#DSC41", 1)
 ## Commands
 All commands include a `TARGET` namespace (e.g., `"DSC"`).
 
+### Channel ID semantics (mandatory rule)
+
+The `io_id`, `pwm_id`, `dac_id`, `adc_id`, etc. arguments are **opaque string identifiers**
+passed directly to the firmware. The prefix in the name (e.g. `IO#`, `PWM#`, `QEP#`, `ADC#`)
+is part of the channel's name in the procedure — it is **not** a constraint on which driver
+method to call.
+
+**Method selection is determined by the logic value type stated in the procedure step, not by the channel name prefix:**
+
+| Procedure step says… | Use |
+|---|---|
+| Set `<channel>` = `'0'` or `'1'` (a logic state) | `write_digital(TARGET, channel_id, 0\|1)` |
+| Set `<channel>` to a PWM duty (0–255 / percentage) | `write_pwm(TARGET, channel_id, duty8bit)` |
+| Set `<channel>` to a voltage | `write_analog_volts(TARGET, channel_id, volts)` |
+| Read `<channel>` expecting `0`/`1` | `read_digital(TARGET, channel_id)` |
+| Read `<channel>` expecting a voltage | `read_analog(TARGET, channel_id)` |
+
+**Example:** `Set HXT PWM#HXT0 = '1'` — the value `'1'` is a logic state, so:
+```python
+fn.write_digital("HXT", "PWM#HXT0", 1)  # correct: logic state → write_digital
+```
+Do **not** fall back to `prompt()` because the channel name contains `PWM#`. The name is
+just a label. Only use `prompt()` when the procedure step has no deterministic mapping to
+any driver method (e.g. a free-text instruction with no channel or value).
+
 ### `write_digital(TARGET, io_id, val01)`
 Set a digital output.
 ```python
