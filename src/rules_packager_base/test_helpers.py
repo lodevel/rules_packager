@@ -27,9 +27,18 @@ automated and manual test steps.
 
 import json
 import re
+import signal
 import traceback
 
 from .Result import Result
+
+# On Windows, CTRL_BREAK_EVENT → SIGBREAK terminates the process by default
+# (no Python exception, no finally).  Re-route it through default_int_handler
+# so it raises KeyboardInterrupt instead — catchable by the test script's
+# except BaseException handler, letting finalize_partial_results /
+# checkpoint_results save partial results before exit.
+if hasattr(signal, "SIGBREAK"):
+    signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
 
 def prompt(msg: str, log:list) -> str:
