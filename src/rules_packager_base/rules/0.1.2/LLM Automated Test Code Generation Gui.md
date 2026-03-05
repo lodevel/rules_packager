@@ -794,6 +794,24 @@ When multiple measurements must be taken on the same physical node using differe
         log.append(msg)
     ```
 
+- **For-loop step numbering (mandatory):**
+  When the procedure contains a repeated/iterated block (macro `@FOR`, explicit loop, or a range shorthand that expands to multiple identical actions), the generated Python **may** use a `for` loop instead of unrolling every iteration into separate code.
+
+  Rules for loops:
+  1. **Step numbers inside the loop body must match the authored procedure step numbers.** If the procedure defines steps 5–7 inside a loop of 4 iterations, each iteration emits `step_progress(5, ...)`, `step_progress(6, ...)`, `step_progress(7, ...)`. The same step numbers will therefore appear multiple times in the log — this is expected and correct.
+  2. **Iteration banner.** At the top of each iteration, before any `step_progress` call, emit an iteration marker so logs are readable:
+     ```python
+     for i, row in enumerate(table):
+         iter_msg = f"--- Iteration {i + 1}/{len(table)} ---"
+         print(iter_msg, flush=True)
+         res.log.append(iter_msg)
+         # Step 5 - <what & why>
+         step_progress(5, "<what & why>", res.log)
+         ...
+     ```
+  3. **Do not unroll when a loop is natural.** If the procedure uses a `@FOR` directive or an obvious repeated pattern (e.g., "Repeat steps 5–7 for each row in the table"), emit a Python `for` loop. Do **not** manually unroll it into N×(steps) with fabricated step numbers — that creates a mismatch between the authored procedure numbering and the generated code.
+  4. **Measurement IDs inside loops** must still be unique across all iterations. Use the loop variable to compute the ID offset (e.g., `res.measurements[str(base_id + i)] = value`).
+
 - **No actuator inference (mandatory)** – Do not infer what drives a node (PSU/channel/controller/etc.). Require explicit wiring/configuration steps; otherwise mark the step AMBIGUOUS and ask. (See **Node and Pin Handling** for the full actuator/ambiguity rules.)
 
 - **Probe connection requirement**:
