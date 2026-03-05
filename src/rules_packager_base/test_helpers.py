@@ -145,6 +145,15 @@ def finalize_partial_results(
       verdicts become missing_verdict (default: SKIP).
     - Never raises.
     """
+    # Temporarily mask SIGBREAK so a late-arriving CTRL_BREAK cannot
+    # interrupt us while we are saving partial results.
+    _prev_handler = None
+    try:
+        if hasattr(signal, "SIGBREAK"):
+            _prev_handler = signal.signal(signal.SIGBREAK, signal.SIG_IGN)
+    except (OSError, ValueError):
+        pass
+
     try:
         mv = str(missing_verdict or "SKIP").strip().upper()
         if mv not in ("PASS", "FAIL", "SKIP"):
@@ -199,5 +208,13 @@ def finalize_partial_results(
         except Exception:
             pass
 
-    except Exception:
+    except BaseException:
         pass
+    finally:
+        # Restore previous SIGBREAK handler so the process can still be
+        # interrupted after finalization (e.g. during checkpoint I/O).
+        if _prev_handler is not None:
+            try:
+                signal.signal(signal.SIGBREAK, _prev_handler)
+            except (OSError, ValueError):
+                pass
