@@ -93,6 +93,7 @@ def parse_quantity(s: str, default_unit: str = "V") -> float:
 def read_measurement(msg: str, log: list, default_unit: str = "V") -> float:
     while True:
         try: return parse_quantity(prompt(msg, log), default_unit)
+        except (EOFError, KeyboardInterrupt): raise
         except Exception as e: 
             msg2 = f"Invalid input: {e}. Use SI units (e.g., 2.40V)."
             print(msg2)
