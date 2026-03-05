@@ -91,7 +91,11 @@ class FncoreMockupClient:
             operation_name: Name of the operation for logging purposes
             
         Returns:
-            The result of the successful operation, or None/raises exception after all retries
+            The result of the successful operation.
+
+        Raises:
+            RuntimeError: if all retries returned None (parse failure).
+            Exception: re-raises the last exception if all retries raised.
         """
         if self.manual:
             return operation_callable()
@@ -115,7 +119,10 @@ class FncoreMockupClient:
         # All retries exhausted
         if last_exception:
             raise last_exception
-        return None
+        raise RuntimeError(
+            f"All {self.max_retries} retries exhausted for {operation_name}: "
+            "response was None every time"
+        )
 
     def open(self):
         """Idempotent. Safe to call multiple times."""
@@ -210,7 +217,7 @@ class FncoreMockupClient:
         return self._write_readline(line, allow_empty=True, default_ok_if_empty=True)
 
     # Digital input
-    def read_digital(self, TARGET: str, io_id: str) -> int | None:
+    def read_digital(self, TARGET: str, io_id: str) -> int:
         line = f"readDigital {TARGET} {io_id}"
 
         if self.manual:
@@ -238,7 +245,7 @@ class FncoreMockupClient:
                 except Exception:
                     pass
 
-            # If everything fails, return None to indicate parsing failure
+            # If everything fails, return None to trigger retry
             return None
         
         return self._retry_on_failure(_do_read, f"read_digital_input on channel {io_id}")
@@ -258,7 +265,7 @@ class FncoreMockupClient:
         return {"cmd": line, "resp": resp, "requested_volts": float(volts), "code": int(code)}
 
     # Analog input
-    def read_analog(self, TARGET: str, adc_id: str) -> float | None:
+    def read_analog(self, TARGET: str, adc_id: str) -> float:
         line = f"readAnalog {TARGET} {adc_id}"
 
         if self.manual:
@@ -288,7 +295,7 @@ class FncoreMockupClient:
                 except ValueError:
                     pass
 
-            # If nothing usable is found, return None
+            # If nothing usable is found, return None to trigger retry
             return None
         
         return self._retry_on_failure(_do_read, f"read_analog_input on channel {adc_id}")

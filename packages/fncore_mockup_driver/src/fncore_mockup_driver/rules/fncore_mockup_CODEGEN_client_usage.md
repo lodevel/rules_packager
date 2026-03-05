@@ -111,12 +111,11 @@ Set a digital output.
 fn.write_digital("DSC", "IO#DSC41", 1)   # drive high
 ```
 
-### `read_digital(TARGET, io_id) -> int | None`
-Read a digital input. Returns `None` if the response cannot be parsed (after retries).
+### `read_digital(TARGET, io_id) -> int`
+Read a digital input. Returns `0` or `1`. Raises `RuntimeError` if the response
+cannot be parsed after all retries.
 ```python
-state = fn.read_digital("DSC", "IO#DSC5")
-if state is None:
-    # handle read failure
+state = fn.read_digital("DSC", "IO#DSC5")  # raises on failure
 ```
 
 ### `write_pwm(TARGET, pwm_id, duty8bit)`
@@ -131,12 +130,11 @@ Write a DAC voltage. `0.0…3.3 V` maps to `0…4095`.
 rec = fn.write_analog_volts("DSC", "DAC#DSC0", 3.3)
 ```
 
-### `read_analog(TARGET, adc_id) -> float | None`
-Read an analog input. Returns `None` if the response cannot be parsed (after retries).
+### `read_analog(TARGET, adc_id) -> float`
+Read an analog input. Returns voltage in volts. Raises `RuntimeError` if the
+response cannot be parsed after all retries.
 ```python
-v = fn.read_analog("DSC", "ADC#DSC2")
-if v is None:
-    # handle read failure
+v = fn.read_analog("DSC", "ADC#DSC2")  # raises on failure
 ```
 
 ### `uart_send(TARGET, uart_id, payload)`
@@ -146,14 +144,13 @@ fn.uart_send("DSC", "UART#0", "HELLO")
 ```
 
 ## Logging
-Each method appends a dict to `controller_log`.
-```json
-{
-  "cmd": "writeAnalog DSC DAC#DSC0 4095",
-  "resp": "OK",
-  "requested_volts": 3.3,
-  "code": 4095
-}
+Each method appends a plain string to `controller_log`. Examples:
+```
+CMD: writeDigital DSC IO#DSC41 1 | RESP: OK
+CMD: readDigital DSC IO#DSC5 | RESP: 1
+MANUAL: readDigital DSC IO#DSC5 -> 1
+[analog_write] 3.3V -> code 4095
+RETRY 1/3 [read_analog_input on channel ADC#DSC2]: got None
 ```
 
 ## Patterns for LLM-generated tests
@@ -169,10 +166,10 @@ try:
     fn.write_digital("DSC", "IO#DSC41", 1)
     # Step 2 — Drive DAC to nominal command
     fn.write_analog_volts("DSC", "DAC#DSC0", 3.3)
-    # Step 3 — Verify status input (returns int | None)
+    # Step 3 — Verify status input (raises RuntimeError on parse failure)
     raw_state = fn.read_digital("DSC", "IO#DSC12")
-    ok = (raw_state == 1) if raw_state is not None else False
-    # Step 4 — Sample a feedback node (returns float | None)
+    ok = raw_state == 1
+    # Step 4 — Sample a feedback node (raises RuntimeError on parse failure)
     fb_v = fn.read_analog("DSC", "ADC#DSC3")
     # Step 5 — Send a diagnostic string over UART
     fn.uart_send("DSC", "UART#0", "PING")
@@ -183,7 +180,7 @@ print(controller_log)
 
 ## Error handling rules
 - Always `close()` in `finally`.
-- Treat non-parseable numeric reads as failure. Keep raw.
+- `read_digital` and `read_analog` raise `RuntimeError` on parse failure after all retries — do **not** check for `None`.
 - Retries 3× by default (50 ms between). Tune with `max_retries` and `retry_delay_ms` constructor params.
 - Clip inputs: PWM 0–255, DAC 0.0–3.3 V, digital 0/1.
 - Never assume default `TARGET`.
