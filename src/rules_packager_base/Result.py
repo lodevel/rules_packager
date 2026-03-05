@@ -210,6 +210,14 @@ class Result:
                     verdict_class = "fail"
                 elif v == "SKIP":
                     verdict_class = "skip"
+                elif v == "PARTIAL":
+                    verdict_class = "partial"
+                elif v == "ERROR":
+                    verdict_class = "error"
+                elif v == "ABORTED":
+                    verdict_class = "aborted"
+                else:
+                    verdict_class = "unknown"
 
             rows_html.append(
                 f"<tr>"
