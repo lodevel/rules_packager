@@ -180,7 +180,7 @@ TRIG_SLOPE = "POS"
 # Success rules (rule ids 1..N; measurement ids appear in ref/refs)
 RULES = {
     1: {"type": "within_pct", "ref": 1, "target": 2.40, "tol_pct": 5, "units": "V", "expr": "{1} = 2.40 V ± 5%"},
-    2: {"type": "within_pct", "ref": 2, "target": 1.73, "tol_pct": 5, "units": "V", "expr": "{2} = 1.73 V ± 5%"},
+    2: {"type": "range_abs", "ref": 2, "lower": 1.68, "upper": 1.78, "units": "V", "expr": "{2} = 1.73 V ± 50 mV"},
     3: {"type": "gt_abs_expr", "refs": [1, 2], "limit": 0.4, "units": "V", "expr": "{1} - {2} > 400mV"},
     4: {"type": "range_abs", "ref": 3, "lower": 0.95, "upper": 1.05, "units": "V", "expr": "0.95V < {3} < 1.05V"},
     5: {"type": "operator_decision", "ref": 4, "expr": "{4} = Ok with margin"},
@@ -1252,7 +1252,7 @@ Define success criteria in a single `RULES` dict. Each entry targets one measure
 #### Rule types and fields
 - `within_pct` — numeric target with ±% tolerance  
   - `{ "type":"within_pct", "ref": <id>, "target": <float>, "tol_pct": <float>, "units":"<str>", "expr":"<verbatim spec>" }`
-- `range_abs` — open interval (lower < x < upper)  
+- `range_abs` — explicit numeric bounds (lower < x < upper); also used for **absolute ± tolerances** by computing `lower = target − tol`, `upper = target + tol`  
   - `{ "type":"range_abs", "ref": <id>, "lower": <float>, "upper": <float>, "units":"<str>", "expr":"..." }`
 - Comparators — `<`, `<=`, `>`, `>=`, `==` on a single ID  
   - `{ "type":"lt_abs"|"le_abs"|"gt_abs"|"ge_abs"|"eq_abs", "ref": <id>, "limit": <float>, "units":"<str>", "expr":"..." }`
@@ -1296,9 +1296,12 @@ Expansion occurs once before verdicts.
 
 #### Numeric forms the LLM may encounter
 - Target ± percent: `{n} = 2.40 V ± 5%` → `within_pct`
+- Target ± absolute: `{n} = 3.30 V ± 50 mV` → `range_abs` (compute `lower = 3.30 − 0.05 = 3.25`, `upper = 3.30 + 0.05 = 3.35`)
 - Open range: `0.95 V < {n} < 1.05 V` → `range_abs`
 - Comparator: `{n} < 10 ns` → `lt_abs`
 - Difference vs limit: `{i} − {j} > 0.4 V` → `gt_abs_expr`
+
+> **Tolerance fidelity:** Never convert between absolute and percentage forms. If the success condition says `± 50 mV`, use `range_abs` with computed bounds — do not back-calculate a percentage for `within_pct`.
 
 #### Units
 - Preserve units in `expr` and `units`. Engine compares numerically in base SI. Do not coerce mismatched units.
@@ -1314,8 +1317,8 @@ Expansion occurs once before verdicts.
 RULES = {
     1: {"type":"within_pct", "ref":1, "target":2.40, "tol_pct":5, "units":"V",
         "expr":"{1} = 2.40 V ± 5%"},
-    2: {"type":"within_pct", "ref":2, "target":1.73, "tol_pct":5, "units":"V",
-        "expr":"{2} = 1.73 V ± 5%"},
+    2: {"type":"range_abs", "ref":2, "lower":1.68, "upper":1.78, "units":"V",
+        "expr":"{2} = 1.73 V ± 50 mV"},
     3: {"type":"gt_abs_expr", "refs":[1,2], "limit":0.4, "units":"V",
         "expr":"{1} - {2} > 400 mV"},
     4: {"type":"range_abs", "ref":3, "lower":0.95, "upper":1.05, "units":"V",

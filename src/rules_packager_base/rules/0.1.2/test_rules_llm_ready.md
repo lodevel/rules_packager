@@ -405,6 +405,10 @@ Each line uses an **ID** plus a comparator and value/tolerance (IDs may start at
 
 If the human supplied values, write them **directly** in the success conditions (no placeholders there).
 
+- **Tolerance fidelity (mandatory):** Preserve the tolerance form from the success condition verbatim — never convert absolute tolerances to percentages or vice versa. The priority is to respect the success conditions as faithfully as possible.
+  - Absolute tolerance `{1} = 3.30 V ± 50 mV` → RULES type `range_abs` with computed bounds (`lower: 3.25`, `upper: 3.35`). Do **not** back-calculate a percentage.
+  - Percentage tolerance `{1} = 3.30 V ± 5%` → RULES type `within_pct` with `target: 3.30`, `tol_pct: 5`. Do **not** convert to absolute bounds.
+  - Comparator `{1} < 50 mV pk-pk` → RULES type `lt_abs` with `limit: 0.05`.
 - If a success condition uses `V` with no subtype, it shall be interpreted as **mean voltage (DC-coupled)**.  
 - For RMS, pk, pk-pk, or amplitude, the subtype must always be explicitly written (e.g., `Vrms`, `Vpk`, `Vpk-pk`).
 - Range shorthand is allowed at the start of a line as `{A..B} <expr>` and expands to one line per ID with identical RHS, e.g. `{1..3} = 2.15V±2%` → `{1} = 2.15V±2%`, `{2} = 2.15V±2%`, `{3} = 2.15V±2%`.

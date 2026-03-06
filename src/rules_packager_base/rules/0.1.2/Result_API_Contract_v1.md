@@ -45,7 +45,7 @@ from rules_packager_base import Result
 
 res = Result(test_name="EXAMPLE-001")
 res.measurements[7] = 3.30
-res.criteria[1] = {"type": "range_abs", "ref": 7, "expr": "{7} = 3.30 V ± 5%"}
+res.criteria[1] = {"type": "within_pct", "ref": 7, "target": 3.30, "tol_pct": 5, "units": "V", "expr": "{7} = 3.30 V ± 5%"}
 res.verdicts[1] = "PASS"  # verdicts are keyed by criterion id
 
 res.print_json()
@@ -129,7 +129,7 @@ Example JSON (after `json.dumps(res.to_json(), indent=2)`):
   "test_name": "...",
   "measurements": {"7": 3.3},
   "verdicts": {"1": "PASS"},
-  "criteria": {"1": {"type": "range_abs", "ref": 7, "expr": "{7} = 3.3 V ± 5%"}},
+  "criteria": {"1": {"type": "within_pct", "ref": 7, "target": 3.3, "tol_pct": 5, "units": "V", "expr": "{7} = 3.3 V ± 5%"}},
   "evidence": [{"label": "scope", "file": "capture.png", "meas_id": 7}],
   "log": ["..."],
   "aborted": false,

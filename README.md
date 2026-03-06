@@ -130,7 +130,7 @@ It is used by:
 
 - Baseline (committed): `rules_packager/drivers_registry.json`
 - Local override (ignored): `rules_packager/drivers_registry.local.json`
-  - To enable optional packs (e.g. FNCORE mockup) without changing the committed baseline, copy:
+  - To enable optional hardware driver packages without changing the committed baseline, copy:
     - `drivers_registry.local.json.example` -> `drivers_registry.local.json`
 
 Relative paths inside registry files are resolved relative to the folder containing `drivers_registry.json`.
@@ -142,7 +142,7 @@ This repo supports optional packs checked out under:
 
 In this layout:
 - `packages/labscpi/` is expected to exist (subrepo/submodule).
-- Optional packs (e.g. `packages/fncore_mockup_driver/`) can exist locally and be enabled via `drivers_registry.local.json`.
+- Optional hardware driver packages can exist locally and be enabled via `drivers_registry.local.json`.
 
 ## Schema
 
