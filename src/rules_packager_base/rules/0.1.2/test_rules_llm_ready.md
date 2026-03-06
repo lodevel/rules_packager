@@ -439,6 +439,8 @@ If the human supplied values, write them **directly** in the success conditions 
 **Shape:**
 ```json
 {
+  "id": "<string | omit>",
+  "requirement": "<string | omit>",
   "name": "<string>",
   "description": "<string>",
   "board": "<string>",
@@ -496,6 +498,9 @@ If the human supplied values, write them **directly** in the success conditions 
 
 **Field rules:**
 - `name`: use **Id** if present; else **Title**. If both exist, prefer **Id**.
+- `id`: **optional, human-populated.** If an **Id** field is present in the procedure source, copy it verbatim. If the output JSON already contains an `id` key, preserve it unchanged. **Never invent or modify this value.**
+- `requirement`: **optional, human-populated.** If a **Requirement** (or **Requirements**) field is present in the procedure source, copy it verbatim. If the output JSON already contains a `requirement` key, preserve it unchanged. **Never invent or modify this value.**
+- If neither `id` nor `requirement` can be found in the procedure source or existing JSON, **omit those keys entirely** (do not emit `null`).
 - `description`: if a **Description** section exists, copy it verbatim (preserve newlines). Otherwise use an empty string `""`.
 - `board`: if a **Board** section exists, copy it verbatim. Otherwise use an empty string `""`.
 - `equipment`: **mandatory** array of equipment requirement objects (see “Equipment extraction rules” below).
@@ -508,7 +513,7 @@ If the human supplied values, write them **directly** in the success conditions 
 - `expected`: array of expected condition objects. Each object has:
   - `text`: copy the condition line verbatim.
   - `media`: array of media references (may be empty `[]`). Same structure as steps.
-- Only allowed top-level keys: `name`, `description`, `board`, `equipment`, `steps`, `expected`. No other keys.
+- Only allowed top-level keys: `id`, `requirement`, `name`, `description`, `board`, `equipment`, `steps`, `expected`. No other keys.
 - **JSON encoding (mandatory)**: the emitted JSON text MUST be ASCII-only and MUST NOT contain any `\\uXXXX` escape sequences.
   - Replace non-ASCII characters with ASCII equivalents:
     - Curly quotes -> straight quotes
