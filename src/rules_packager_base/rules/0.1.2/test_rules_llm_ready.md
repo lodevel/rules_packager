@@ -500,7 +500,7 @@ If the human supplied values, write them **directly** in the success conditions 
   - `media`: array of media references (may be empty `[]`). Each media object has:
     - `type`: always `"image"`.
     - `ref`: object with `component` (string, e.g., `"P4"`, `"J1"`, `"TP_VOUT"`) and `pin` (number or `null` for entire component).
-    - `caption`: brief description of what the image shows.
+    - `caption`: short identifier label for quick visual lookup (see **Caption format** below). Must NOT be a descriptive sentence.
 - `expected`: array of expected condition objects. Each object has:
   - `text`: copy the condition line verbatim.
   - `media`: array of media references (may be empty `[]`). Same structure as steps.
@@ -558,7 +558,15 @@ If the human supplied values, write them **directly** in the success conditions 
 - For wiring/connection steps, extract all referenced connectors/TPs as separate media entries.
 - If a specific pin is mentioned (e.g., "P6 pin 2", "P6#2"), set `pin` to that number; otherwise use `null`.
 - For measurement steps on a node, include a media reference to help the operator locate it.
-- **TP naming:** If the text contains `TP <NAME>`, treat the physical reference name as `<NAME>` (do **not** include the `TP ` prefix in `ref.component`). The TP name may include characters like `+`, `_`, digits, and `.`. Strip any trailing clause such as `as {…}`. Use a human-friendly caption like `"TP <NAME>"`.
+- **TP naming:** If the text contains `TP <NAME>`, treat the physical reference name as `<NAME>` (do **not** include the `TP ` prefix in `ref.component`). The TP name may include characters like `+`, `_`, digits, and `.`. Strip any trailing clause such as `as {…}`.
+- **Caption format (mandatory):** Captions are short identifier labels for quick board-level lookup — NOT descriptive sentences.
+  - **Connectors (whole):** `"<REF> (<signal>)"` — e.g. `"P4 (+SR_28V)"`, `"J1 (GND)"`.
+  - **Connector pins:** `"<REF> pin <N>"` — e.g. `"P6 pin 2"`, `"P10 pin 5"`.
+  - **Test points:** `"TP <NAME>"` — e.g. `"TP VMONI.1"`.
+  - **Components:** `"<REF>"` — e.g. `"U3"`, `"R12"`.
+  - The optional `(<signal>)` parenthetical is taken verbatim from the step text only when the step text itself contains one. Do **not** invent or rephrase it.
+  - Do **not** add prefixes like `"Measurement reference:"`, `"Connector"`, or any other preamble.
+  - Maximum length: ~40 characters.
 - **Range expansion:** If the text matches `TP <PREFIX>.[<a>..<b>]`, expand to components `"<PREFIX>.<a>" ... "<PREFIX>.<b>"` and do not also add a `"TP <PREFIX>"` entry.
 - For configuration-only steps (e.g., "Configure PSU to 28 V"), `media` may be empty.
 - For expected conditions, include media only if a reference image is relevant (e.g., reference waveforms).
@@ -628,12 +636,12 @@ expected:
         {
           "type": "image",
           "ref": { "component": "P4", "pin": null },
-          "caption": "Connector P4 (+SR_28V)"
+          "caption": "P4 (+SR_28V)"
         },
         {
           "type": "image",
           "ref": { "component": "P5", "pin": null },
-          "caption": "Connector P5 (GND)"
+          "caption": "P5 (GND)"
         }
       ]
     },
