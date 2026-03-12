@@ -439,8 +439,8 @@ If the human supplied values, write them **directly** in the success conditions 
 **Shape:**
 ```json
 {
-  "id": "<string | omit>",
-  "requirement": "<string | omit>",
+  "id": "",
+  "requirement": "",
   "name": "<string>",
   "description": "<string>",
   "board": "<string>",
@@ -498,9 +498,8 @@ If the human supplied values, write them **directly** in the success conditions 
 
 **Field rules:**
 - `name`: use **Id** if present; else **Title**. If both exist, prefer **Id**.
-- `id`: **optional, human-populated.** If an **Id** field is present in the procedure source, copy it verbatim. If the output JSON already contains an `id` key, preserve it unchanged. **Never invent or modify this value.**
-- `requirement`: **optional, human-populated.** If a **Requirement** (or **Requirements**) field is present in the procedure source, copy it verbatim. If the output JSON already contains a `requirement` key, preserve it unchanged. **Never invent or modify this value.**
-- If neither `id` nor `requirement` can be found in the procedure source or existing JSON, **omit those keys entirely** (do not emit `null`).
+- `id`: **required, human-populated.** Always emit the `id` key. If an **Id** field is present in the procedure source, copy it verbatim. If the output JSON already contains an `id` key, preserve it unchanged. Otherwise set it to an empty string `""`. **Never invent or modify a non-empty value unless explicitly provided by the human.**
+- `requirement`: **required, human-populated.** Always emit the `requirement` key. If a **Requirement** (or **Requirements**) field is present in the procedure source, copy it verbatim. If the output JSON already contains a `requirement` key, preserve it unchanged. Otherwise set it to an empty string `""`. **Never invent or modify a non-empty value unless explicitly provided by the human.**
 - `description`: if a **Description** section exists, copy it verbatim (preserve newlines). Otherwise use an empty string `""`.
 - `board`: if a **Board** section exists, copy it verbatim. Otherwise use an empty string `""`.
 - `equipment`: **mandatory** array of equipment requirement objects (see “Equipment extraction rules” below).
