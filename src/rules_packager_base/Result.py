@@ -112,7 +112,7 @@ class Result:
 
     def print_json(self) -> None:
         print("\nRESULTS:")
-        print(json.dumps(self.to_json(), indent=2))
+        print(json.dumps(self.to_json(), indent=2, default=str))
 
 
     def export_html(self, output: Optional[str | Path] = None) -> Path:
